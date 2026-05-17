@@ -56,8 +56,8 @@ Phone (React Native)
 ## Project Structure
 
 ```
-ai-gateway/
-├── .env                        # 
+llm-gateway/
+├── .env                        #
 ├── docker-compose.yml          # Orchestrates all services
 ├── backend/
 │   ├── Dockerfile
@@ -160,11 +160,10 @@ ai-gateway/
 - Per-model and per-provider breakdown
 
 ### Stage 10 — Networking + Reverse Proxy
-- Tailscale already installed (Tailscale IP visible in LM Studio)
 - Caddy reverse proxy for HTTPS termination
 - Phone reaches backend via Tailscale IP from anywhere
 
-### Stage 11 — Mobile App (React Native + Expo)
+### Stage 11 — Mobile App via React Native + Expo 
 - Auth screens: Login, Register
 - Home screen: conversation list
 - Chat screen: real-time SSE token streaming
@@ -193,7 +192,7 @@ ai-gateway/
 2. Create a `.env` file at the root:
 ```
 LM_URL=http://host.docker.internal:xxxx/v1
-LM_DEFAULT_MODEL=model-name-
+LM_DEFAULT_MODEL=model-name
 ```
 
 3. Start the backend:
@@ -214,7 +213,7 @@ docker compose up --build
 |---|---|---|
 | `LM_URL` | LM Studio server base URL | `http://host.docker.internal:xxxx/v1` |
 | `LM_DEFAULT_MODEL` | Default model identifier | `model-name` |
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@postgres/aigateway` |
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@postgres/llmgateway` |
 | `REDIS_URL` | Redis connection string | `redis://redis:6379` |
 | `SECRET_KEY` | JWT signing secret | long random string |
 | `OPENAI_API_KEY` | OpenAI key (optional) | `sk-...` |
