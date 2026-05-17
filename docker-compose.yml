@@ -1,4 +1,17 @@
 services:
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ishaab 
+      POSTGRES_PASSWORD: ishaab27
+      POSTGRES_DB: llmgateway 
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+
   backend:
     build: ./backend
     ports:
@@ -9,3 +22,9 @@ services:
       - .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - postgres
+      - redis
+
+volumes:
+  pgdata: 
