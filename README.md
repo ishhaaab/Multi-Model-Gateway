@@ -14,23 +14,7 @@ This project is an **inference orchestration layer** ie a backend system that si
 
 ## Architecture
 
-```
-Phone (React Native)
-        ↓  HTTPS
-   Caddy (reverse proxy)
-        ↓
-   FastAPI Gateway
-   ├── Auth Service (JWT)
-   ├── Routing Engine  ──→ LM Studio (local)
-   ├── Streaming Engine ──→ Ollama (local)
-   ├── Tool Executor   ──→ OpenAI / Anthropic (cloud)
-   ├── Memory Service
-   └── Metrics Service
-        ↓
-   PostgreSQL + pgvector
-   Redis
-   Prometheus → Grafana
-```
+![Architecture](arch-dia.png)
 
 ---
 
