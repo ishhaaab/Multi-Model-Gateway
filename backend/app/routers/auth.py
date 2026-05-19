@@ -17,10 +17,10 @@ router = APIRouter()
 
 @router.post("/register")
 async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == user_data.email))
-    user = result.scalar_one_or_none()
+    query = await db.execute(select(User).where(User.email == user_data.email))
+    user = query.scalar_one_or_none()
     
-    if user != None:
+    if user is not None:
         raise HTTPException(status_code=400, detail="user already exists")
 
     new_user = User(email=user_data.email, hashed_password=hash_password(user_data.password))
@@ -32,8 +32,8 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
 
 @router.post("/login")
 async def login_user(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == user_data.email))
-    user = result.scalar_one_or_none()
+    query = await db.execute(select(User).where(User.email == user_data.email))
+    user = query.scalar_one_or_none()
     
     if user is not None and verify_password(user_data.password, user.hashed_password):
         token = create_access_token(str(user.id))

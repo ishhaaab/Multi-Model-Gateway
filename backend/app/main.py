@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import chat, models, auth
 
 from app.db import engine, Base
-from app.models import users
+from app.models import users, conversations, messages
+from app.routers import convo
 
 app= FastAPI()
 
@@ -24,6 +25,7 @@ def health_check():
 app.include_router(chat.router, prefix = "/v1")
 app.include_router(models.router, prefix = "/v1")
 app.include_router(auth.router, prefix="/auth")
+app.include_router(convo.router, prefix="/v1")
 
 @app.on_event("startup")
 async def create_tables():
