@@ -1,9 +1,4 @@
-# LLM Gateway
-
-A self-hosted LLM inference gateway that routes requests across local and cloud LLMs, built with FastAPI, Docker, and React Native. Designed as a privacy-aware, OpenAI-compatible backend that you can access from your phone anywhere in the world via Tailscale.
-
-> **Status:** Stage 2 complete — core streaming pipeline working. Actively building toward full production-grade backend.
-
+> **Status:** Stage 5 complete. Working on routing logic.
 ---
 
 ## What This Is
@@ -76,10 +71,9 @@ llm-gateway/
 
 ## What's Built So Far
 
-### Stage 1 — LM Studio Verified 
+### Stage 1 — LM Studio Up and Running
 - LM Studio server running on port `xxxx`
-- OpenAI-compatible API confirmed working via direct curl
-- Docker Desktop installed and running
+- OpenAI-compatible API working 
 
 ### Stage 2 — Backend Gateway 
 - FastAPI app containerized with Docker
@@ -92,10 +86,6 @@ llm-gateway/
 - Auto-generated interactive API docs at `/docs`
 
 **Verified:** Streaming pipeline end-to-end — message sent, tokens streamed back from local model through Docker to browser.
-
----
-
-## What's Coming
 
 ### Stage 3 — Containerize PostgreSQL + Redis
 - Add postgres and redis services to `docker-compose.yml`
@@ -116,10 +106,12 @@ llm-gateway/
 - Load conversation history and pass it to LM Studio for context
 - CRUD endpoints: create, list, fetch, delete conversations
 
+## What's Coming:
+
 ### Stage 6 — Routing Engine
 - `services/router.py` — the brain of the gateway
 - Privacy-aware routing: sensitive requests are to be sent to local models
-- Task-aware routing: vision tasks to GPT Image, coding tasks to Claude
+- Task-aware routing: vision tasks to Gemini, coding tasks to OpenRouter Models
 - Multi-provider support: LM Studio, Ollama, OpenAI, Anthropic
 - Provider override via request flag
 
@@ -199,7 +191,7 @@ docker compose up --build
 | `LM_DEFAULT_MODEL` | Default model identifier | `model-name` |
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@postgres/llmgateway` |
 | `REDIS_URL` | Redis connection string | `redis://redis:6379` |
-| `SECRET_KEY` | JWT signing secret | long random string |
+| `SECRET_KEY` | JWT signing secret key | 
 | `OPENAI_API_KEY` | OpenAI key (optional) | `sk-...` |
 | `ANTHROPIC_API_KEY` | Anthropic key (optional) | `sk-ant-...` |
 
