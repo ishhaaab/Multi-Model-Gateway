@@ -35,30 +35,34 @@ This project is an **inference orchestration layer** ie a backend system that si
 ## Project Structure
 
 ```
-llm-gateway/
-├── .env                        #
+multi-model-gateway/
+├── .env                        
 ├── docker-compose.yml          # Orchestrates all services
 ├── backend/
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── app/
 │       ├── main.py             # App entry point, middleware, router registration
+│       ├── db.py               # Database settings            
 │       ├── core/
 │       │   ├── config.py       # Pydantic settings 
-│       │   ├── security.py     # JWT creation and verification (coming Stage 4)
+│       │   ├── security.py     # JWT creation and verification 
 │       │   └── metrics.py      # Prometheus custom metrics (coming Stage 9)
 │       ├── routers/
 │       │   ├── chat.py         # POST /v1/chat/completions — SSE streaming
 │       │   ├── models.py       # GET /v1/models — lists loaded LM Studio models
-│       │   ├── auth.py         # POST /auth/register, /auth/login (coming Stage 4)
-│       │   └── conversations.py # CRUD for conversation history (coming Stage 5)
+│       │   ├── auth.py         # POST /auth/register, /auth/login 
+│       │   └── convo.py        # CRUD for conversation history 
 │       ├── services/
 │       │   ├── router.py       # Routing logic to decide on provider 
 │       │   ├── streaming.py    # SSE streaming helpers
 │       │   ├── memory.py       # pgvector embeddings + semantic recall
 │       │   └── tools.py        # Tool registry and executor
 │       └── models/
-│           └── db.py           # SQLAlchemy database models
+│           └── users.py        # SQLAlchemy database models           
+│           └── messages.py
+│           └── conversations.py
+|                      
 ├── mobile/                     # React Native + Expo app (coming Stage 11)
 ├── caddy/
 │   └── Caddyfile               # Reverse proxy config (coming Stage 10)
@@ -71,11 +75,11 @@ llm-gateway/
 
 ## What's Built So Far
 
-### Stage 1 — LM Studio Up and Running
+### Stage 1: LM Studio Up and Running
 - LM Studio server running on port `xxxx`
 - OpenAI-compatible API working 
 
-### Stage 2 — Backend Gateway 
+### Stage 2: Backend Gateway 
 - FastAPI app containerized with Docker
 - Auto-reloading development server via uvicorn `--reload`
 - `GET /health` — health check endpoint
@@ -85,35 +89,33 @@ llm-gateway/
 - CORS middleware configured
 - Auto-generated interactive API docs at `/docs`
 
-**Verified:** Streaming pipeline end-to-end — message sent, tokens streamed back from local model through Docker to browser.
-
-### Stage 3 — Containerize PostgreSQL + Redis
+### Stage 3: Containerize PostgreSQL + Redis
 - Add postgres and redis services to `docker-compose.yml`
 - Confirm all three services communicate inside Docker network
 - Add pgvector extension to postgres
 
-### Stage 4 — Auth System
+### Stage 4: Auth System
 - User registration and login endpoints
 - Password hashing with bcrypt
 - JWT access + refresh token flow
 - Auth middleware protecting all chat endpoints
 - Full flow: register > login > token > authenticated chat
 
-### Stage 5 — Conversation Persistence
+### Stage 5: Conversation Persistence
 - SQLAlchemy database models: User, Conversation, Message
 - Alembic migrations
 - Save every message exchange to PostgreSQL
 - Load conversation history and pass it to LM Studio for context
 - CRUD endpoints: create, list, fetch, delete conversations
 
-## What's Coming:
-
-### Stage 6 — Routing Engine
+### Stage 6: Routing Engine
 - `services/router.py` — the brain of the gateway
 - Privacy-aware routing: sensitive requests are to be sent to local models
 - Task-aware routing: vision tasks to Gemini, coding tasks to OpenRouter Models
-- Multi-provider support: LM Studio, Ollama, OpenAI, Anthropic
+- Multi-provider support: LM Studio, OpenRouter, Ollama, ComfyUI and in future OpenAI, Anthropic, 
 - Provider override via request flag
+
+## What's Coming:
 
 ### Stage 7 — Semantic Memory (RAG)
 - Generate embeddings for every message using local embedding model
@@ -169,6 +171,13 @@ llm-gateway/
 ```
 LM_URL=http://host.docker.internal:xxxx/v1
 LM_DEFAULT_MODEL=model-name
+
+DATABASE_URL= add a postgres db url
+REDIS_URL= add a redis url
+
+SECRET_KEY= add secret key for jwt
+ALGORITHM= choose algo for hashing
+ACCESS_TOKEN_EXPIRY_MINUTES= set token expiry
 ```
 
 3. Start the backend:
@@ -179,7 +188,6 @@ docker compose up --build
 4. Verify:
 - Health check: `http://localhost:xxxx/health`
 - API docs: `http://localhost:xxxx/docs`
-- Models list: `http://localhost:xxxx/v1/models`
 
 ---
 
@@ -194,15 +202,7 @@ docker compose up --build
 | `SECRET_KEY` | JWT signing secret key | 
 | `OPENAI_API_KEY` | OpenAI key (optional) | 
 | `ANTHROPIC_API_KEY` | Anthropic key (optional) | 
-| Variable | Description |
-|---|---|---|
-| `LM_URL` | LM Studio server base URL |
-| `LM_DEFAULT_MODEL` | Default model identifier | 
-| `DATABASE_URL` | PostgreSQL connection string |
-| `REDIS_URL` | Redis connection string |
-| `SECRET_KEY` | JWT signing secret |
-| `OPENAI_API_KEY` | OpenAI key (optional) |
-| `ANTHROPIC_API_KEY` | Anthropic key (optional) | 
+
 
 ---
 
