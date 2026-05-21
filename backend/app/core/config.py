@@ -6,6 +6,12 @@ class Settings(BaseSettings):
     APP_HOST: str = "0.0.0.0"
     APP_PORT:int=8008
 
+    OPENROUTER_DEFAULT_MODEL: str= ""
+    OPENROUTER_API_KEY: str = ""
+
+    GEMINI_MODEL: str= ""
+    GEMINI_API_KEY: str = ""
+
     DATABASE_URL: str
     REDIS_URL: str
     

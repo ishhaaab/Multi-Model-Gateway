@@ -19,6 +19,8 @@ class ConvoRename(BaseModel):
     title: str
 
 
+# create a new conversation & get it
+
 @router.post("/convo")
 async def convo_create(convo_data: ConvoCreate, db: AsyncSession = Depends(get_db), user_id = Depends(security.get_current_user)):
     new_convo= Conversation(title= convo_data.title, user_id= user_id)
@@ -31,6 +33,8 @@ async def convo_get(db: AsyncSession = Depends(get_db), user_id= Depends(securit
     query= await db.execute(select(Conversation).where(Conversation.user_id== user_id))
     conversations = query.scalars().all()
     return conversations
+
+# get the messages from a specific conversation
 
 @router.get("/convo/{convo_id}")
 async def messages_get(convo_id: str, db: AsyncSession = Depends(get_db), user_id= Depends(security.get_current_user) ):
@@ -47,6 +51,7 @@ async def messages_get(convo_id: str, db: AsyncSession = Depends(get_db), user_i
     messages = messages_result.scalars().all()
     return messages
 
+# rename the conversation title
 
 @router.patch("/convo/{convo_id}")
 async def convo_rename(convo_id: str, convo_data: ConvoRename, db: AsyncSession= Depends(get_db), user_id= Depends(security.get_current_user)):
@@ -63,6 +68,8 @@ async def convo_rename(convo_id: str, convo_data: ConvoRename, db: AsyncSession=
     await db.commit()
     return {"message": "conversation renamed"}
 
+
+# remove the conversation from the database
 
 @router.delete("/convo/{convo_id}")
 async def convo_delete(convo_id: str, db: AsyncSession= Depends(get_db), user_id= Depends(security.get_current_user)):

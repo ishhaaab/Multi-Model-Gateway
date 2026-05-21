@@ -1,9 +1,4 @@
-# LLM Gateway
-
-A self-hosted LLM inference gateway that routes requests across local and cloud LLMs, built with FastAPI, Docker, and React Native. Designed as a privacy-aware, OpenAI-compatible backend that you can access from your phone anywhere in the world via Tailscale.
-
-> **Status:** Stage 2 complete — core streaming pipeline working. Actively building toward full production-grade backend.
-
+> **Status:** Stage 5 complete. Working on routing logic.
 ---
 
 ## What This Is
@@ -193,15 +188,24 @@ docker compose up --build
 
 ## Environment Variables
 
-| Variable | Description | Example |
+| Variable | Description |
+|---|---|
+| `LM_URL` | LM Studio server base URL | 
+| `LM_DEFAULT_MODEL` | Default model identifier |
+| `DATABASE_URL` | PostgreSQL connection string | 
+| `REDIS_URL` | Redis connection string | 
+| `SECRET_KEY` | JWT signing secret key | 
+| `OPENAI_API_KEY` | OpenAI key (optional) | 
+| `ANTHROPIC_API_KEY` | Anthropic key (optional) | 
+| Variable | Description |
 |---|---|---|
-| `LM_URL` | LM Studio server base URL | `http://host.docker.internal:xxxx/v1` |
-| `LM_DEFAULT_MODEL` | Default model identifier | `model-name` |
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@postgres/llmgateway` |
-| `REDIS_URL` | Redis connection string | `redis://redis:6379` |
-| `SECRET_KEY` | JWT signing secret | long random string |
-| `OPENAI_API_KEY` | OpenAI key (optional) | `sk-...` |
-| `ANTHROPIC_API_KEY` | Anthropic key (optional) | `sk-ant-...` |
+| `LM_URL` | LM Studio server base URL |
+| `LM_DEFAULT_MODEL` | Default model identifier | 
+| `DATABASE_URL` | PostgreSQL connection string |
+| `REDIS_URL` | Redis connection string |
+| `SECRET_KEY` | JWT signing secret |
+| `OPENAI_API_KEY` | OpenAI key (optional) |
+| `ANTHROPIC_API_KEY` | Anthropic key (optional) | 
 
 ---
 
