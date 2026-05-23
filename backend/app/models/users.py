@@ -11,6 +11,7 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime, default= datetime.datetime.utcnow)
     is_active = Column(Boolean, default=True)
+    last_active = Column(DateTime, nullable=True)
 
 
 
