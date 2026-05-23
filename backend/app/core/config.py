@@ -17,8 +17,10 @@ class Settings(BaseSettings):
     
     SECRET_KEY: str
     ALGORITHM: str
+
     ACCESS_TOKEN_EXPIRY_MINUTES: int = 60
-    
+    REFRESH_TOKEN_EXPIRY_DAYS: int= 7
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8"

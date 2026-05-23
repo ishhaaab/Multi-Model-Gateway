@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import chat, models, auth
 
 from app.db import engine, Base
-from app.models import users, conversations, messages
+from app.models import users, conversations, messages, refresh_tokens
 from app.routers import convo
 
 app= FastAPI()
