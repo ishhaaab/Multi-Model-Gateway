@@ -1,4 +1,4 @@
-> **Status:** Stage 5 complete. Working on routing logic.
+> **Status:** Stage 9 complete. Observability stack (Prometheus + Grafana + Langfuse) integrated.
 ---
 
 ## What This Is
@@ -23,7 +23,7 @@ This project is an **inference orchestration layer** ie a backend system that si
 | Database | PostgreSQL + SQLAlchemy | Users, conversations, message history |
 | Vector DB | pgvector | Semantic memory / RAG |
 | Cache / Queue | Redis | Rate limiting, session cache, async jobs |
-| Observability | Prometheus + Grafana | Latency, token/sec, throughput dashboards |
+| Observability | Prometheus + Grafana + Langfuse | Metrics, dashboards, LLM tracing |
 | Remote Access | Tailscale | VPN mesh — phone reaches laptop directly |
 | Containers | Docker + Docker Compose | Packages every service cleanly |
 | Reverse Proxy | Caddy | HTTPS termination, routes to FastAPI |
@@ -47,7 +47,7 @@ multi-model-gateway/
 │       ├── core/
 │       │   ├── config.py       # Pydantic settings 
 │       │   ├── security.py     # JWT creation and verification 
-│       │   └── metrics.py      # Prometheus custom metrics (coming Stage 9)
+│       └── metrics.py          # Prometheus custom metrics + Langfuse tracing
 │       ├── routers/
 │       │   ├── chat.py         # POST /v1/chat/completions — SSE streaming
 │       │   ├── models.py       # GET /v1/models — lists loaded LM Studio models
@@ -67,8 +67,8 @@ multi-model-gateway/
 ├── caddy/
 │   └── Caddyfile               # Reverse proxy config (coming Stage 10)
 └── monitoring/
-    ├── prometheus.yml           # Scrape config (coming Stage 9)
-    └── grafana/                 # Dashboard definitions (coming Stage 9)
+    ├── prometheus.yml           # Scrape config
+    └── grafana/                 # Dashboard definitions
 ```
 
 ---
@@ -115,6 +115,13 @@ multi-model-gateway/
 - Multi-provider support: LM Studio, OpenRouter, Ollama, ComfyUI and in future OpenAI, Anthropic, 
 - Provider override via request flag
 
+### Stage 9: Observability
+- Prometheus for metrics such as requests per provider latency histogram, tokens/sec gauge 
+- **Prometheus** at `localhost:9090` scraping the backend at `/metrics`
+- **Grafana** at `localhost:3000` for dashboards
+- **Langfuse Cloud** for LLM tracing. It traces every generation with metadata (provider, model, latency, tokens)
+- Per-model and per-provider metric breakdown
+
 ## What's Coming:
 
 ### Stage 7 — Semantic Memory (RAG)
@@ -130,12 +137,6 @@ multi-model-gateway/
 - Detect when model returns a tool call
 - Execute handler, return result to model
 - Model generates final response with tool data
-
-### Stage 9 — Observability
-- Prometheus metrics endpoint auto-exposed
-- Custom metrics: requests per provider, latency histogram, tokens/sec gauge
-- Grafana dashboards: request rate, latency percentiles, token throughput
-- Per-model and per-provider breakdown
 
 ### Stage 10 — Networking + Reverse Proxy
 - Caddy reverse proxy for HTTPS termination
@@ -167,19 +168,7 @@ multi-model-gateway/
 **Setup:**
 
 1. Clone the repo
-2. Create a `.env` file at the root:
-```
-LM_URL=http://host.docker.internal:xxxx/v1
-LM_DEFAULT_MODEL=model-name
-
-DATABASE_URL= add a postgres db url
-REDIS_URL= add a redis url
-
-SECRET_KEY= add secret key for jwt
-ALGORITHM= choose algo for hashing
-ACCESS_TOKEN_EXPIRY_MINUTES= set token expiry
-```
-
+2. Create a `.env` file at the root (see [**Environment Variables**](#environment-variables) for more info)
 3. Start the backend:
 ```bash
 docker compose up --build
@@ -195,13 +184,25 @@ docker compose up --build
 
 | Variable | Description |
 |---|---|
-| `LM_URL` | LM Studio server base URL | 
+| `LM_URL` | LM Studio server base URL |
 | `LM_DEFAULT_MODEL` | Default model identifier |
-| `DATABASE_URL` | PostgreSQL connection string | 
-| `REDIS_URL` | Redis connection string | 
-| `SECRET_KEY` | JWT signing secret key | 
-| `OPENAI_API_KEY` | OpenAI key (optional) | 
-| `ANTHROPIC_API_KEY` | Anthropic key (optional) | 
+| `APP_HOST` | Backend bind address |
+| `APP_PORT` | Backend port|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `REDIS_URL` | Redis connection string |
+| `SECRET_KEY` | JWT signing secret key |
+| `ALGORITHM` | JWT hashing algorithm  |
+| `ACCESS_TOKEN_EXPIRY_MINUTES` | JWT access token expiry|
+| `REFRESH_TOKEN_EXPIRY_DAYS` | JWT refresh token expiry |
+| `OPENROUTER_API_KEY` | OpenRouter API key (optional) |
+| `OPENROUTER_DEFAULT_MODEL` | Default OpenRouter model (optional) |
+| `GEMINI_API_KEY` | Google Gemini API key (optional) |
+| `GEMINI_MODEL` | Default Gemini model (optional) |
+| `OPENAI_API_KEY` | OpenAI key (optional) |
+| `ANTHROPIC_API_KEY` | Anthropic key (optional) |
+| `LANGFUSE_PUBLIC_KEY` | Langfuse Cloud public key |
+| `LANGFUSE_SECRET_KEY` | Langfuse Cloud secret key|
+| `LANGFUSE_BASE_URL` | Langfuse base URL  |
 
 
 ---

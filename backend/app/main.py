@@ -1,10 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import chat, models, auth
 
+from app.routers import chat, models, auth
 from app.routers import convo
+from prometheus_fastapi_instrumentator import Instrumentator
 
 app= FastAPI()
+
+Instrumentator().instrument(app).expose(app)
 
 app.add_middleware(
     CORSMiddleware,

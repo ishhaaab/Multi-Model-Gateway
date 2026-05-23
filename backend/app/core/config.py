@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRY_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRY_DAYS: int= 7
 
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_BASE_URL: str = "http://langfuse:3000"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8"
