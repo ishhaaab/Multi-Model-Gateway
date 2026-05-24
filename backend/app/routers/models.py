@@ -6,17 +6,17 @@ from app.services.router import get_lm_client, get_provider
 
 router = APIRouter()
 
-@router.get("/models") # when a GET request is sent to the url /models, execute this list_models() func. 
-async def list_local_models():
+@router.get("/models")
+async def list_lm_models():
     client = get_lm_client()
-    models = await client.models.list()
-    return models
+    result = await client.models.list()
+    return {"data": [{"id": m.id, "object": "model"} for m in result.data]}
 
-@router.get("/openrouter/models") # when a GET request is sent to the url /models, execute this list_models() func. 
-async def list_models():
+@router.get("/openrouter/models")
+async def list_openrouter_models():
     client = AsyncOpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=settings.OPENROUTER_API_KEY
-)
-    models = await client.models.list()
-    return models
+        base_url="https://openrouter.ai/api/v1",
+        api_key=settings.OPENROUTER_API_KEY
+    )
+    result = await client.models.list()
+    return {"data": [{"id": m.id, "object": "model"} for m in result.data]}
