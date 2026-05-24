@@ -39,6 +39,15 @@ services:
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
 
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+    depends_on:
+      - backend
+
 
 volumes:
   pgdata:
