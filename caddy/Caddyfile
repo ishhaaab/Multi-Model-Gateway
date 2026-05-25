@@ -3,5 +3,16 @@
 }
 
 :80 {
-	reverse_proxy backend:8000
+	@api path /api/*
+	route @api {
+		uri strip_prefix /api
+		reverse_proxy backend:8000
+	}
+
+	@websocket {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy @websocket host.docker.internal:6969
+	reverse_proxy host.docker.internal:6969
 }
