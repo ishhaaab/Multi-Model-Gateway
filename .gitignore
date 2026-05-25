@@ -6,3 +6,6 @@ __pycache__/
 .pytest_cache
 useless/
 alembic/versions/__pycache__/
+.expo/
+node_modules/
+by-v0/
