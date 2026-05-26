@@ -3,6 +3,19 @@ from app.core.config import settings
 
 
 # Prometheus metrics
+
+active_conversations = Gauge(
+    "active_conversations_total",
+    "Number of active conversations"
+)
+
+prompt_tokens = Counter(
+    "prompt_tokens_total",
+    "Total prompt tokens sent",
+    ["provider", "model"]
+)
+
+
 chat_requests_total = Counter(
     "chat_requests_total",
     "Total chat requests",
@@ -33,6 +46,7 @@ def record_metrics(provider: str, model: str, elapsed: float,
     chat_requests_total.labels(provider=provider, model=model).inc()
     chat_latency_seconds.labels(provider=provider).observe(elapsed)
     tokens_per_second.labels(model=model).set(tps)
+    prompt_tokens.labels(provider=provider, model=model).inc(len(messages))
 
     # Langfuse v4 - correct API
     langfuse = get_client()

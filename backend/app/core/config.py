@@ -5,6 +5,9 @@ class Settings(BaseSettings):
     LM_DEFAULT_MODEL: str
     APP_HOST: str = "0.0.0.0"
     APP_PORT:int=8008
+    
+    RATE_LIMIT_PER_MINUTE: int = 30
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
 
     OPENROUTER_DEFAULT_MODEL: str= ""
     OPENROUTER_API_KEY: str = ""

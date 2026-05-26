@@ -17,3 +17,4 @@ psycopg2-binary
 prometheus-fastapi-instrumentator
 prometheus-client
 langfuse
+redis[asyncio]

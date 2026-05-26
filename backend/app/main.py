@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-from app.routers import chat, models, auth
-from app.routers import convo
+from app.routers import chat, models, auth, convo
+from app.middleware.ratelimit import RateLimitMiddleware
+from app.core.redis import get_redis, close_redis
 from prometheus_fastapi_instrumentator import Instrumentator
 
 app= FastAPI()
@@ -16,6 +16,17 @@ app.add_middleware(
     allow_methods=["*"],  #to accept any HTTP method (GET, POST, etc.)
     allow_headers=["*"], # to accept any headers
                    )
+
+app.add_middleware(RateLimitMiddleware)
+
+@app.on_event("startup")
+async def startup():
+    await get_redis()  # warm the connection pool
+
+@app.on_event("shutdown")
+async def shutdown():
+    await close_redis()
+
 
 
 @app.get("/health")

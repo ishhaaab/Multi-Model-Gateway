@@ -4,7 +4,12 @@ from pydantic import BaseModel
 from typing  import List, Optional
 from openai import AsyncOpenAI
 
+from enum import Enum
 
+class Provider(str, Enum):
+    auto= "auto"
+    local= "local"
+    openrouter= "openrouter"
 
 class ChatMessage(BaseModel):
     role: str
@@ -17,7 +22,7 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     model: str = settings.LM_DEFAULT_MODEL
     stream: bool = True
-    provider: str= "auto"
+    provider: Provider= Provider.auto
     private: bool= False
 
 
@@ -27,6 +32,12 @@ def get_lm_client():
         base_url=settings.LM_URL,
         api_key = "lm-studio"
         )
+
+def get_openrouter_client():
+    return AsyncOpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=settings.OPENROUTER_API_KEY
+    )
 
 async def get_provider(request: ChatRequest):
 
@@ -42,38 +53,26 @@ async def get_provider(request: ChatRequest):
 
     # explicit provider:
 
-    if request.provider == "local":
+    if request.provider == Provider.local:
         return get_lm_client(), settings.LM_DEFAULT_MODEL
 
-    if request.provider == "openrouter":
-        return AsyncOpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=settings.OPENROUTER_API_KEY
-        ), request.model if "/" in request.model else settings.OPENROUTER_DEFAULT_MODEL
+    if request.provider == Provider.openrouter:
+        return get_openrouter_client()
 
     # explicit openroutuer model: 
     
     if "/" in request.model :
-        return AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=settings.OPENROUTER_API_KEY
-        ), request.model
+        return get_openrouter_client()
 
 
     # coding tasks are handled by openrouter models
     if any(keyword in last_message for keyword in code):
-        return AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=settings.OPENROUTER_API_KEY
-        ), settings.OPENROUTER_DEFAULT_MODEL
+        return get_openrouter_client()
 
     # vision tasks are handled by ???
     
     # long tasks are handled by openrouter models
     if len(request.messages) > 80:
-        return AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=settings.OPENROUTER_API_KEY
-        ), settings.OPENROUTER_DEFAULT_MODEL
+        return get_openrouter_client()
 
     return get_lm_client(), settings.LM_DEFAULT_MODEL

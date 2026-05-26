@@ -39,7 +39,7 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
     elapsed = time.time() - start_time
 
     await save_messages(conversation_id, request.messages[-1].content, full_response, model, db)
-    record_metrics(request.provider, model, elapsed, token_count, messages, full_response, conversation_id)
+    record_metrics(request.provider.value, model, elapsed, token_count, messages, full_response, conversation_id)
 
     yield "data: [DONE]\n\n"
 
