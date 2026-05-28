@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import chat, models, auth, convo
+from app.routers import chat, models, auth, convo, presets
 from app.middleware.ratelimit import RateLimitMiddleware
 from app.core.redis import get_redis, close_redis
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -38,3 +38,4 @@ app.include_router(chat.router, prefix = "/v1")
 app.include_router(models.router, prefix = "/v1")
 app.include_router(auth.router, prefix="/auth")
 app.include_router(convo.router, prefix="/v1")
+app.include_router(presets.router, prefix="/v1")

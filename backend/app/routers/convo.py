@@ -50,7 +50,6 @@ async def messages_get(convo_id: str, db: AsyncSession = Depends(get_db), user_i
     return messages
 
 # rename the conversation title
-
 @router.patch("/convo/{convo_id}")
 async def convo_rename(convo_id: str, convo_data: ConvoRename, db: AsyncSession= Depends(get_db), user_id= Depends(security.get_current_user)):
     query= await db.execute(select(Conversation).where(Conversation.id== convo_id))
@@ -68,7 +67,6 @@ async def convo_rename(convo_id: str, convo_data: ConvoRename, db: AsyncSession=
 
 
 # remove the conversation from the database
-
 @router.delete("/convo/{convo_id}")
 async def convo_delete(convo_id: str, db: AsyncSession= Depends(get_db), user_id= Depends(security.get_current_user)):
     query= await db.execute(select(Conversation).where(Conversation.id== convo_id))

@@ -19,6 +19,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
+    preset_id: Optional[str] = None
     messages: List[ChatMessage]
     model: str = settings.LOCAL_DEFAULT_MODEL
     stream: bool = True

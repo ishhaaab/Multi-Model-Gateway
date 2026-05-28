@@ -99,6 +99,13 @@ async def save_messages(conversation_id: str, user_content: str, assistant_conte
     db.add(user_msg)
     db.add(assistant_msg)
     await db.commit()
+
+    convo_result = await db.execute(select(Conversation).where(Conversation.id == conversation_id))
+    convo = convo_result.scalar_one_or_none()
+    if convo:
+        convo.token_count = (convo.token_count or 0) + token_count
+        await db.commit()
+
     await store_memory(conversation_id, role="user", content=user_content, db= db)
     await store_memory(conversation_id, role="assistant", content=assistant_content, db= db)
 
