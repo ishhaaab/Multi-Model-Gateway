@@ -2,14 +2,14 @@ from fastapi import APIRouter, HTTPException
 from openai import AsyncOpenAI
 import httpx
 from app.core.config import settings
-from app.services.router import get_lm_client
+from app.services.router import get_local_client
 
 
 router = APIRouter()
 
 @router.get("/models")
 async def list_lm_models():
-    client = get_lm_client()
+    client = get_local_client()
     result = await client.models.list()
     return {"data": [{"id": m.id, "object": "model"} for m in result.data]}
 

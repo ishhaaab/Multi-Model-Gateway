@@ -20,7 +20,6 @@ class ConvoRename(BaseModel):
 
 
 # create a new conversation & get it
-
 @router.post("/convo")
 async def convo_create(convo_data: ConvoCreate, db: AsyncSession = Depends(get_db), user_id = Depends(security.get_current_user)):
     new_convo= Conversation(title= convo_data.title, user_id= user_id)
@@ -35,7 +34,6 @@ async def convo_get(db: AsyncSession = Depends(get_db), user_id= Depends(securit
     return conversations
 
 # get the messages from a specific conversation
-
 @router.get("/convo/{convo_id}")
 async def messages_get(convo_id: str, db: AsyncSession = Depends(get_db), user_id= Depends(security.get_current_user) ):
     convo_result = await db.execute(select(Conversation).where(Conversation.id == convo_id))

@@ -41,7 +41,12 @@ export async function streamChat(options: StreamChatOptions): Promise<void> {
   }
 
   if (!response.ok) {
-    onError(new Error(`Chat request failed: ${response.status} ${response.statusText}`))
+    let detail = response.statusText
+    try {
+      const body = await response.json()
+      detail = body?.error?.message || JSON.stringify(body)
+    } catch {}
+    onError(new Error(`Error code: ${response.status} - ${detail}`))
     return
   }
 

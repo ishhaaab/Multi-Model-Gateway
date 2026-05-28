@@ -1,8 +1,11 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    LM_URL:str
-    LM_DEFAULT_MODEL: str
+    LOCAL_URL:str
+    LOCAL_DEFAULT_MODEL: str
+
+    OLLAMA_API_KEY: str= ""
+
     APP_HOST: str = "0.0.0.0"
     APP_PORT:int=8008
     

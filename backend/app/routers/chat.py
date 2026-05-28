@@ -13,7 +13,7 @@ router = APIRouter()
 
 async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
     conversation_id = await conversation(request, user_id, db)
-    history = await load_history(conversation_id, db)
+    history = await load_history(conversation_id, request.messages[-1].content, db)
     current = {"role": "user", "content": request.messages[-1].content}
     messages = history + [current]
 
@@ -38,7 +38,7 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
 
     elapsed = time.time() - start_time
 
-    await save_messages(conversation_id, request.messages[-1].content, full_response, model, db)
+    await save_messages(conversation_id, request.messages[-1].content, full_response, model, token_count, db)
     record_metrics(request.provider.value, model, elapsed, token_count, messages, full_response, conversation_id)
 
     yield "data: [DONE]\n\n"

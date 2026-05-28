@@ -20,17 +20,17 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     messages: List[ChatMessage]
-    model: str = settings.LM_DEFAULT_MODEL
+    model: str = settings.LOCAL_DEFAULT_MODEL
     stream: bool = True
     provider: Provider= Provider.auto
     private: bool= False
 
 
 
-def get_lm_client():
+def get_local_client():
     return AsyncOpenAI(
-        base_url=settings.LM_URL,
-        api_key = "lm-studio"
+        base_url=settings.LOCAL_URL,
+        api_key = "ollama"
         )
 
 def get_openrouter_client():
@@ -40,39 +40,26 @@ def get_openrouter_client():
     )
 
 async def get_provider(request: ChatRequest):
-
     last_message = request.messages[-1].content.lower()
     code = ["script", "code", "function", "debug", "bug", "python", "c++", "java", "javascript", "typescript"]
     image= ["draw","image", "picture", "screenshot", "imagine"]
 
+    # user has model choice; fall back to the provider default if unset
+    local_model = request.model if request.model != 'auto' else settings.LOCAL_DEFAULT_MODEL
+    or_model    = request.model if request.model != 'auto' else settings.OPENROUTER_DEFAULT_MODEL
 
-    # privacy 
-    if request.private:
-        return get_lm_client(), settings.LM_DEFAULT_MODEL
-
-
-    # explicit provider:
-
-    if request.provider == Provider.local:
-        return get_lm_client(), settings.LM_DEFAULT_MODEL
-
-    if request.provider == Provider.openrouter:
-        return get_openrouter_client()
-
-    # explicit openroutuer model: 
-    
-    if "/" in request.model :
-        return get_openrouter_client()
-
-
-    # coding tasks are handled by openrouter models
-    if any(keyword in last_message for keyword in code):
-        return get_openrouter_client()
-
-    # vision tasks are handled by ???
-    
-    # long tasks are handled by openrouter models
-    if len(request.messages) > 80:
-        return get_openrouter_client()
-
-    return get_lm_client(), settings.LM_DEFAULT_MODEL
+    match request:
+        case ChatRequest(private=True):
+            return get_local_client(), local_model                # privacy 
+        case ChatRequest(provider=Provider.local):                
+            return get_local_client(), local_model                # explicitly use local   
+        case ChatRequest(model=m) if "/" in m:
+            return get_openrouter_client(), request.model         # explicitly use openrouter 
+        case ChatRequest(provider=Provider.openrouter):
+            return get_openrouter_client(), or_model              # openrouter model
+        case _ if any(k in last_message for k in code):
+            return get_openrouter_client(), or_model              # for coding tasks we use openrouter model
+        case _ if len(request.messages) > 80:
+            return get_openrouter_client(), or_model              # for long tasks, use openrouter model
+        case _:
+            return get_local_client(), local_model       

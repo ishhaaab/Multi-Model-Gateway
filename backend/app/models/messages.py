@@ -12,3 +12,4 @@ class Message(Base):
     created_at= Column(DateTime, default=datetime.datetime.utcnow)
     model_used= Column(String, nullable=True)
     tokens_used= Column(Integer, default=0)
+    index = Column(Integer, nullable=True)

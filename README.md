@@ -184,8 +184,8 @@ docker compose up --build
 
 | Variable | Description |
 |---|---|
-| `LM_URL` | LM Studio server base URL |
-| `LM_DEFAULT_MODEL` | Default model identifier |
+| `LOCAL_URL` | LM Studio server base URL |
+| `LOCAL_DEFAULT_MODEL` | Default model identifier |
 | `APP_HOST` | Backend bind address |
 | `APP_PORT` | Backend port|
 | `DATABASE_URL` | PostgreSQL connection string |

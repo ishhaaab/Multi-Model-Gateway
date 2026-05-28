@@ -55,7 +55,7 @@ function PasswordInput({
 }: React.ComponentProps<typeof Input> & { id: string; placeholder?: string }) {
   const [visible, setVisible] = useState(false)
   return (
-    <div className="relative">
+    <div className="relative" suppressHydrationWarning>
       <Input
         id={id}
         type={visible ? 'text' : 'password'}

@@ -2,13 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { AlertCircle, MessageSquarePlus, RefreshCw } from 'lucide-react'
+import { AlertCircle, MessageSquarePlus, RefreshCw, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { useStreamChat } from '@/hooks/use-stream-chat'
 import { ChatMessage } from '@/components/chat-message'
 import { ChatInput } from '@/components/chat-input'
-import { ModelSelector } from '@/components/model-selector'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -105,11 +104,10 @@ export function ChatView({ conversationId, onNewConversation }: ChatViewProps) {
 
   const [selectedModel, setSelectedModel] = useState('auto')
   const [selectedProvider, setSelectedProvider] = useState('auto')
-  const [modelSelectorOpen, setModelSelectorOpen] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(!!conversationId)
   const [lastSent, setLastSent] = useState<{ content: string } | null>(null)
 
-  const { messages, isStreaming, error, sendMessage, abort, clearError, setMessages } =
+  const { messages, isStreaming, error, retryStatus, sendMessage, abort, clearError, setMessages } =
     useStreamChat(conversationId ?? undefined)
 
   const scrollAreaRef = useRef<HTMLDivElement>(null)
@@ -222,6 +220,21 @@ export function ChatView({ conversationId, onNewConversation }: ChatViewProps) {
         )}
       </div>
 
+      {/* Retry banner */}
+      {retryStatus && (
+        <div className="mx-4 mb-2 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5">
+          <Loader2 className="size-4 shrink-0 text-amber-500 animate-spin" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
+              Rate limited — retrying {retryStatus.attempt}/{retryStatus.total}...
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Waiting for the provider to recover.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Error banner */}
       {error && (
         <ErrorBanner
@@ -236,15 +249,6 @@ export function ChatView({ conversationId, onNewConversation }: ChatViewProps) {
         onSend={handleSend}
         onAbort={abort}
         isStreaming={isStreaming}
-        selectedModel={selectedModel}
-        selectedProvider={selectedProvider}
-        onModelClick={() => setModelSelectorOpen(true)}
-      />
-
-      {/* Model selector sheet */}
-      <ModelSelector
-        open={modelSelectorOpen}
-        onClose={() => setModelSelectorOpen(false)}
         selectedModel={selectedModel}
         selectedProvider={selectedProvider}
         onSelect={(model, provider) => {
