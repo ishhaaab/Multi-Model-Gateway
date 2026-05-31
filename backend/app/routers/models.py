@@ -8,7 +8,7 @@ from app.services.router import get_local_client
 router = APIRouter()
 
 @router.get("/models")
-async def list_lm_models():
+async def list_local_models():
     client = get_local_client()
     result = await client.models.list()
     return {"data": [{"id": m.id, "object": "model"} for m in result.data]}

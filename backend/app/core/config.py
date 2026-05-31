@@ -4,6 +4,9 @@ class Settings(BaseSettings):
     LOCAL_URL:str
     LOCAL_DEFAULT_MODEL: str
 
+    LM_URL: str
+    LM_DEFAULT_MODEL: str
+
     OLLAMA_API_KEY: str= ""
 
     APP_HOST: str = "0.0.0.0"

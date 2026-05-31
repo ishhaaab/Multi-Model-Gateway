@@ -15,6 +15,10 @@ from app.core.config import settings
 from app.models.users import User
 from app.models.refresh_tokens import RefreshToken
 
+from app.models.presets import Preset
+from app.models.templates import PromptTemplate
+import uuid
+
 class UserCreate(BaseModel):
     email: str
     password: str
@@ -32,6 +36,36 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
     new_user = User(email=user_data.email, hashed_password=security.hash_password(user_data.password))
     db.add(new_user)
     await db.commit()    
+    
+    # a default model parameter preset for LLMs
+    default_preset = Preset(
+        id=uuid.uuid4(),
+        user_id=new_user.id,
+        name="Default",
+        temperature=0.8,
+        context_overflow="truncate_middle",
+        )
+    db.add(default_preset)
+    
+    # a default prompt template for t2i ComfyUI tasks
+    default_template = PromptTemplate(
+        id=uuid.uuid4(),
+        user_id=new_user.id,
+        name="Default SDXL Template",
+        description="Default structure for SDXL prompt rewriting",
+        structure="""quality,
+        art style, artist references,
+        camera,
+        subject,
+        accessories and clothes,
+        pose,
+        environment,
+        lighting"""
+        )
+    db.add(default_template)
+    
+    await db.commit()
+
     return {"message": "user created successfully"}
     
 
