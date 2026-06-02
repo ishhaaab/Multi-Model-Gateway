@@ -1,0 +1,122 @@
+import { useCallback, useRef, useState } from "react";
+import { useChatStore } from "@/stores/chat-store";
+import { apiClient } from "@/lib/api-client";
+import type { ChatRequest, Provider } from "@/lib/types";
+
+interface SendOptions {
+  presetId?: string | null;
+  provider?: Provider;
+  private?: boolean;
+}
+
+function deriveTitle(content: string): string {
+  const words = content.trim().split(/\s+/).slice(0, 6).join(" ");
+  return words.length > 0 ? words : "New Chat";
+}
+
+export function useChat() {
+  const abortRef = useRef<AbortController | null>(null);
+  const lastAttemptRef = useRef<{ content: string; options?: SendOptions } | null>(null);
+  const [pendingUserContent, setPendingUserContent] = useState<string | null>(null);
+
+  const isStreaming = useChatStore((s) => s.isStreaming);
+  const streamedContent = useChatStore((s) => s.streamedContent);
+  const streamError = useChatStore((s) => s.streamError);
+
+  const send = useCallback(async (content: string, options?: SendOptions) => {
+    const store = useChatStore.getState();
+    if (!content.trim() || store.isStreaming) return;
+
+    lastAttemptRef.current = { content, options };
+
+    let conversationId = store.activeConversationId;
+    const wasNew = !conversationId;
+
+    try {
+      if (!conversationId) {
+        conversationId = await store.createConversation("New Chat");
+      }
+    } catch {
+      store.setStreamError("Could not start a conversation. Is the backend running?");
+      return;
+    }
+
+    const abortController = new AbortController();
+    abortRef.current = abortController;
+
+    store.setStreamError(null);
+    store.clearStream();
+    store.setStreaming(true);
+    setPendingUserContent(content);
+
+    const request: ChatRequest = {
+      conversation_id: conversationId,
+      preset_id: options?.presetId !== undefined ? options.presetId : store.presetId,
+      messages: [{ role: "user", content }],
+      // Critical: backend only auto-routes when model === "auto".
+      model: "auto",
+      stream: true,
+      provider: options?.provider ?? store.provider,
+      private: options?.private ?? store.isPrivate,
+    };
+
+    await apiClient.streamChat(
+      request,
+      (token) => useChatStore.getState().appendToStream(token),
+      async () => {
+        abortRef.current = null;
+        const s = useChatStore.getState();
+        try {
+          if (wasNew) {
+            await s.renameConversation(conversationId!, deriveTitle(content));
+          }
+          await s.fetchMessages(conversationId!);
+          await s.fetchConversations();
+        } catch {
+          /* non-fatal: streamed content already shown */
+        } finally {
+          s.setStreaming(false);
+          s.clearStream();
+          setPendingUserContent(null);
+        }
+      },
+      (error) => {
+        abortRef.current = null;
+        const s = useChatStore.getState();
+        s.setStreaming(false);
+        s.setStreamError(error);
+        s.clearStream();
+        setPendingUserContent(null);
+        // Re-sync in case the backend persisted a partial turn.
+        if (conversationId) s.fetchMessages(conversationId);
+      },
+      abortController.signal
+    );
+  }, []);
+
+  const cancelStream = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    const s = useChatStore.getState();
+    s.setStreaming(false);
+    s.clearStream();
+    setPendingUserContent(null);
+    if (s.activeConversationId) s.fetchMessages(s.activeConversationId);
+  }, []);
+
+  const retryLast = useCallback(() => {
+    const last = lastAttemptRef.current;
+    useChatStore.getState().setStreamError(null);
+    if (last) void send(last.content, last.options);
+  }, [send]);
+
+  return {
+    send,
+    cancelStream,
+    retryLast,
+    isStreaming,
+    streamedContent,
+    streamError,
+    pendingUserContent,
+  };
+}

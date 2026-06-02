@@ -1,0 +1,266 @@
+import type { ChatRequest } from "./types";
+import { useAuthStore } from "@/stores/auth-store";
+
+export class ApiError extends Error {
+  statusCode: number;
+  detail: string;
+
+  constructor(statusCode: number, detail: string) {
+    super(detail);
+    this.name = "ApiError";
+    this.statusCode = statusCode;
+    this.detail = detail;
+  }
+
+  get isAuthError() {
+    return this.statusCode === 401;
+  }
+  get isRateLimit() {
+    return this.statusCode === 429;
+  }
+  get isNotFound() {
+    return this.statusCode === 404;
+  }
+  get isNetworkError() {
+    return this.statusCode === 0;
+  }
+}
+
+const NETWORK_MESSAGE =
+  "Cannot connect to server. Check if the backend is running.";
+
+interface ApiClientConfig {
+  baseUrl: string;
+  apiPrefix: string;
+  getAccessToken: () => string | null;
+  getRefreshToken: () => string | null;
+  onRefresh: (token: string) => void;
+  onAuthFailure: () => void;
+}
+
+class ApiClient {
+  private baseUrl: string;
+  private apiPrefix: string;
+  private getAccessToken: () => string | null;
+  private getRefreshToken: () => string | null;
+  private onRefresh: (token: string) => void;
+  private onAuthFailure: () => void;
+
+  // Coalesce concurrent refreshes into a single in-flight request.
+  private refreshInFlight: Promise<boolean> | null = null;
+
+  constructor(config: ApiClientConfig) {
+    this.baseUrl = config.baseUrl;
+    this.apiPrefix = config.apiPrefix;
+    this.getAccessToken = config.getAccessToken;
+    this.getRefreshToken = config.getRefreshToken;
+    this.onRefresh = config.onRefresh;
+    this.onAuthFailure = config.onAuthFailure;
+  }
+
+  private fullUrl(path: string): string {
+    return `${this.baseUrl}${this.apiPrefix}${path}`;
+  }
+
+  private buildHeaders(body: unknown, stream: boolean): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (body !== undefined && body !== null) {
+      headers["Content-Type"] = "application/json";
+    }
+    if (stream) {
+      headers["Accept"] = "text/event-stream";
+    }
+    const token = this.getAccessToken();
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    return headers;
+  }
+
+  private async rawFetch(
+    url: string,
+    method: string,
+    headers: Record<string, string>,
+    body: unknown,
+    signal?: AbortSignal
+  ): Promise<Response> {
+    try {
+      return await fetch(url, {
+        method,
+        headers,
+        body: body !== undefined && body !== null ? JSON.stringify(body) : undefined,
+        signal,
+      });
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") throw err;
+      // fetch rejects (TypeError) only on network-level failures
+      throw new ApiError(0, NETWORK_MESSAGE);
+    }
+  }
+
+  /** Core JSON request with one transparent token-refresh + retry on 401. */
+  async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    options?: { stream?: boolean; signal?: AbortSignal }
+  ): Promise<T> {
+    const url = this.fullUrl(path);
+    const stream = options?.stream ?? false;
+    let headers = this.buildHeaders(body, stream);
+
+    let response = await this.rawFetch(url, method, headers, body, options?.signal);
+
+    if (response.status === 401 && this.getRefreshToken()) {
+      const refreshed = await this.tryRefreshToken();
+      if (refreshed) {
+        headers = this.buildHeaders(body, stream);
+        response = await this.rawFetch(url, method, headers, body, options?.signal);
+      } else {
+        this.onAuthFailure();
+        throw new ApiError(401, "Session expired. Please log in again.");
+      }
+    }
+
+    if (!response.ok) {
+      const error = await response
+        .json()
+        .catch(() => ({ detail: "Request failed" }));
+      throw new ApiError(response.status, error.detail || "Request failed");
+    }
+
+    if (stream) {
+      return response as unknown as T;
+    }
+
+    // 204 / empty body guard
+    const text = await response.text();
+    return (text ? JSON.parse(text) : undefined) as T;
+  }
+
+  private tryRefreshToken(): Promise<boolean> {
+    if (this.refreshInFlight) return this.refreshInFlight;
+
+    this.refreshInFlight = (async () => {
+      const refreshToken = this.getRefreshToken();
+      if (!refreshToken) return false;
+      try {
+        const response = await fetch(this.fullUrl("/auth/refresh"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        if (!response.ok) return false;
+        const data = await response.json();
+        this.onRefresh(data.access_token);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        this.refreshInFlight = null;
+      }
+    })();
+
+    return this.refreshInFlight;
+  }
+
+  /**
+   * SSE streaming for chat.
+   *
+   * The backend frames each chunk as `data: <content>\n\n`, terminates with
+   * `data: [DONE]\n\n`, and (notably) emits errors WITHOUT a `data:` prefix
+   * (`ERROR: ...` or `Internal server error`). We parse on the `\n\n` event
+   * boundary so multi-line tokens survive, and detect both error shapes.
+   */
+  async streamChat(
+    body: ChatRequest,
+    onToken: (token: string) => void,
+    onDone: () => void,
+    onError: (error: string) => void,
+    signal?: AbortSignal
+  ): Promise<void> {
+    let response: Response;
+    try {
+      response = await this.request<Response>("POST", "/v1/chat/completions", body, {
+        stream: true,
+        signal,
+      });
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") return;
+      if (err instanceof ApiError) {
+        if (err.isRateLimit) return onError("Rate limit exceeded. Try again later.");
+        return onError(err.detail);
+      }
+      return onError((err as Error)?.message || NETWORK_MESSAGE);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) return onError("Streaming not supported by this browser.");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    const handleEvent = (rawEvent: string): boolean => {
+      const event = rawEvent.replace(/\r/g, "");
+      if (event.length === 0) return false;
+
+      if (event.startsWith("data: ")) {
+        const payload = event.slice(6);
+        if (payload === "[DONE]") {
+          onDone();
+          return true;
+        }
+        if (payload.startsWith("ERROR: ")) {
+          onError(payload.slice(7));
+          return true;
+        }
+        onToken(payload);
+        return false;
+      }
+
+      // Un-prefixed error frames from the backend
+      if (event.startsWith("ERROR: ")) {
+        onError(event.slice(7));
+        return true;
+      }
+      if (event.trim() === "Internal server error") {
+        onError("Internal server error");
+        return true;
+      }
+      return false;
+    };
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+
+        for (const ev of events) {
+          if (handleEvent(ev)) return;
+        }
+      }
+      // Flush any trailing event the stream ended without a blank line on
+      if (buffer.length > 0) {
+        if (handleEvent(buffer)) return;
+      }
+      onDone();
+    } catch (err) {
+      if ((err as Error)?.name !== "AbortError") {
+        onError((err as Error)?.message || NETWORK_MESSAGE);
+      }
+    }
+  }
+}
+
+export const apiClient = new ApiClient({
+  baseUrl: import.meta.env.VITE_API_URL || "http://localhost:2727",
+  apiPrefix: import.meta.env.VITE_API_PREFIX || "",
+  getAccessToken: () => useAuthStore.getState().accessToken,
+  getRefreshToken: () => useAuthStore.getState().refreshToken,
+  onRefresh: (token) => useAuthStore.getState().setAccessToken(token),
+  onAuthFailure: () => useAuthStore.getState().forceLogout(),
+});
