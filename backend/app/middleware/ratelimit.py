@@ -5,43 +5,59 @@ from jose import jwt, JWTError
 from app.core.config import settings
 from app.core.redis import get_redis
 import time
+import uuid
 
-EXCLUDED_PATHS = {"/health", "/metrics", "/docs", "/openapi.json", "/auth/register", "/auth/login", "/auth/refresh"}
+# skip rate limiting entirely.
+EXCLUDED_PATHS = {"/health", "/metrics", "/docs", "/openapi.json"}
+
+# Unauthenticated auth endpoints have a stricter, IP-based limit to curb
+# brute force / credential stuffing / mass account creation.
+AUTH_PATHS = {"/auth/login", "/auth/register", "/auth/refresh"}
+
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in EXCLUDED_PATHS:
+        path = request.url.path
+        if path in EXCLUDED_PATHS:
             return await call_next(request)
 
-        # Extract user_id from JWT— don't re-raise auth errors here,
-        # actual route handler will deal with bad tokens
         user_id = self._extract_user_id(request)
-        if user_id is None:
-            return await call_next(request)
+
+        # Authenticated per-user bucket. Anonymous per-IP bucket so
+        # unauthenticated traffic can't bypass the limiter entirely.
+        if user_id:
+            key = f"rate:user:{user_id}"
+            limit = settings.RATE_LIMIT_PER_MINUTE
+        else:
+            client_ip = self._client_ip(request)
+            if path in AUTH_PATHS:
+                key = f"rate:auth:{client_ip}"
+                limit = settings.AUTH_RATE_LIMIT_PER_MINUTE
+            else:
+                key = f"rate:ip:{client_ip}"
+                limit = settings.RATE_LIMIT_PER_MINUTE
 
         redis = await get_redis()
-        key = f"rate:{user_id}"
         window = settings.RATE_LIMIT_WINDOW_SECONDS
-        limit = settings.RATE_LIMIT_PER_MINUTE
-
         now = int(time.time())
         window_start = now - window
+        # Unique member so multiple requests within the same second are each counted.
+        member = f"{now}:{uuid.uuid4().hex}"
 
         pipe = redis.pipeline()
-        pipe.zremrangebyscore(key, 0, window_start)   # drop requests outside window
-        pipe.zadd(key, {str(now): now})                # add this request
-        pipe.zcard(key)                                # count requests in window
-        pipe.expire(key, window)                       # auto-expire the key
+        pipe.zremrangebyscore(key, 0, window_start)   # drop requests outside the window
+        pipe.zadd(key, {member: now})                 # record this request
+        pipe.zcard(key)                               # count requests in the window
+        pipe.expire(key, window)                      # auto-expire idle keys
         results = await pipe.execute()
 
         count = results[2]
 
         if count > limit:
-            retry_after = window - (now - window_start)
             return JSONResponse(
                 status_code=429,
                 content={"detail": "Rate limit exceeded. Try again later."},
-                headers={"Retry-After": str(retry_after)}
+                headers={"Retry-After": str(window)},
             )
 
         return await call_next(request)
@@ -58,3 +74,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return decoded.get("sub")
         except JWTError:
             return None
+
+    def _client_ip(self, request: Request) -> str:
+        # Behind a Caddy, the real client IP is the
+        # first hop in X-Forwarded-For; fall back to the direct peer.
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host if request.client else "unknown"

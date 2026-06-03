@@ -39,17 +39,20 @@ async def unload_rewrite_model(instance_id: str):
             json={"instance_id": instance_id}
         )
 
-async def get_template(template_id: str, db: AsyncSession) -> str:
+async def get_template(template_id: str, user_id: str, db: AsyncSession) -> str:
     if not template_id:
         return DEFAULT_STRUCTURE
     result = await db.execute(
-        select(PromptTemplate).where(PromptTemplate.id == template_id)
+        select(PromptTemplate).where(
+            PromptTemplate.id == template_id,
+            PromptTemplate.user_id == user_id,
+        )
     )
     template = result.scalar_one_or_none()
     return template.structure if template else DEFAULT_STRUCTURE
 
-async def rewrite_prompt(prompt: str, template_id: str = None, db: AsyncSession = None) -> str:
-    structure = await get_template(template_id, db) if db else DEFAULT_STRUCTURE
+async def rewrite_prompt(prompt: str, template_id: str = None, db: AsyncSession = None, user_id: str = None) -> str:
+    structure = await get_template(template_id, user_id, db) if db else DEFAULT_STRUCTURE
 
     instance_id = await load_rewrite_model()
 

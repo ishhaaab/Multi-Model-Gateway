@@ -94,5 +94,5 @@ class RewriteRequest(BaseModel):
 
 @router.post("/templates/rewrite")
 async def rewrite(request: RewriteRequest, db: AsyncSession = Depends(get_db), user_id: str = Depends(get_current_user)):
-    result = await rewrite_prompt(request.prompt, request.template_id, db)
+    result = await rewrite_prompt(request.prompt, request.template_id, db, user_id)
     return {"rewritten_prompt": result}

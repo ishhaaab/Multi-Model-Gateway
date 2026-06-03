@@ -5,6 +5,22 @@ import copy
 
 COMFY_URL = "http://host.docker.internal:8188"
 
+# Valid aspect_ratio values accepted by the ComfyUI ResolutionSelector node (id "17").
+# Single source of truth: the frontend fetches these via GET /v1/images/aspect-ratios,
+# and the image request validates against them. Every workflow that uses the
+# ResolutionSelector node shares this list.
+ASPECT_RATIOS = [
+    "1:1 (Square)",
+    "3:2 (Photo)",
+    "4:3 (Standard)",
+    "16:9 (Widescreen)",
+    "21:9 (Ultrawide)",
+    "2:3 (Portrait Photo)",
+    "3:4 (Portrait Standard)",
+    "9:16 (Portrait Widescreen)",
+]
+DEFAULT_ASPECT_RATIO = "9:16 (Portrait Widescreen)"
+
 BASE_WORKFLOW = {
     "3": {
         "inputs": {
@@ -48,7 +64,7 @@ BASE_WORKFLOW = {
     },
     "17": {
         "inputs": {
-            "aspect_ratio": "9:16 (Portrait Widescreen)",
+            "aspect_ratio": DEFAULT_ASPECT_RATIO,
             "megapixels": 1.3
         },
         "class_type": "ResolutionSelector"
@@ -72,7 +88,7 @@ async def generate_image(
     negative_prompt: str = "text, watermark, blurry, low quality",
     steps: int = 10,
     cfg: float = 1.2,
-    aspect_ratio: str = "9:16 (Portrait Widescreen)",
+    aspect_ratio: str = DEFAULT_ASPECT_RATIO,
     batch_size: int = 1,
     seed: int = None
 ) -> str:

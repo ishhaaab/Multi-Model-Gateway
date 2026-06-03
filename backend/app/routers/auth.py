@@ -73,12 +73,17 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
 async def login_user(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     query = await db.execute(select(User).where(User.email == user_data.email))
     user = query.scalar_one_or_none()
-    
-    if user is not None and security.verify_password(user_data.password, user.hashed_password):
+
+    # Always run a verification (against a dummy hash when the user is absent)
+    # so login response time doesn't reveal whether the email is registered.
+    hashed = user.hashed_password if user is not None else security.DUMMY_PASSWORD_HASH
+    password_ok = security.verify_password(user_data.password, hashed)
+
+    if user is not None and password_ok:
         expires_at = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRY_DAYS)
         token= security.create_refresh_token(str(user.id), expires_at)
         
-        refresh_token= RefreshToken(token= token, 
+        refresh_token= RefreshToken(token_hash= security.hash_token(token),
                                     user_id= user.id,
                                     expires_at= expires_at
         )
@@ -99,14 +104,21 @@ class RefreshRequest(BaseModel):
 
 @router.post("/refresh")
 async def refresh_token(request: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    # find token in database
-    query = await db.execute(select(RefreshToken).where(RefreshToken.token== request.refresh_token))
+    # find token in database (stored as a hash, not plaintext)
+    token_hash = security.hash_token(request.refresh_token)
+    query = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
     token_record = query.scalar_one_or_none()
 
     if token_record is None:
         raise HTTPException(status_code=401, detail="invalid refresh token")
 
-    # verify JWT not expired
+    # reject if the stored record has expired, independent of the JWT's own exp
+    if token_record.expires_at is not None and token_record.expires_at < datetime.utcnow():
+        await db.delete(token_record)
+        await db.commit()
+        raise HTTPException(status_code=401, detail="refresh token expired")
+
+    # verify JWT signature/exp and type
     try:
         payload = jwt.decode(request.refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id = payload.get("sub")
@@ -114,17 +126,30 @@ async def refresh_token(request: RefreshRequest, db: AsyncSession = Depends(get_
             raise HTTPException(status_code=401, detail="invalid token type")
         if user_id is None:
             raise HTTPException(status_code=401, detail="invalid token")
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=401, detail="refresh token expired or invalid")
 
-    # return new access token
+    # rotate: invalidate the used refresh token and issue a fresh one
+    await db.delete(token_record)
+    new_expires_at = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRY_DAYS)
+    new_refresh = security.create_refresh_token(user_id, new_expires_at)
+    db.add(RefreshToken(
+        token_hash=security.hash_token(new_refresh),
+        user_id=user_id,
+        expires_at=new_expires_at,
+    ))
+    await db.commit()
+
+    # return new access + rotated refresh token
     access_token = security.create_access_token(user_id)
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"refresh_token": new_refresh, "access_token": access_token, "token_type": "bearer"}
 
 
 @router.post("/logout")
 async def logout(request: RefreshRequest, db: AsyncSession = Depends(get_db), user_id: str = Depends(security.get_current_user)):
-    query = await db.execute(select(RefreshToken).where(RefreshToken.token== request.refresh_token, RefreshToken.user_id== user_id))
+    query = await db.execute(select(RefreshToken).where(RefreshToken.token_hash== security.hash_token(request.refresh_token), RefreshToken.user_id== user_id))
     token_record = query.scalar_one_or_none()
 
     if token_record is None:

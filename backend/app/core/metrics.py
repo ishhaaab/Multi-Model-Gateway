@@ -9,9 +9,15 @@ active_conversations = Gauge(
     "Number of active conversations"
 )
 
-prompt_tokens = Counter(
+prompt_tokens_counter = Counter(
     "prompt_tokens_total",
     "Total prompt tokens sent",
+    ["provider", "model"]
+)
+
+completion_tokens_counter = Counter(
+    "completion_tokens_total",
+    "Total completion tokens generated",
     ["provider", "model"]
 )
 
@@ -38,15 +44,17 @@ tokens_per_second = Gauge(
 from langfuse import get_client
 
 def record_metrics(provider: str, model: str, elapsed: float,
-                   token_count: int, messages: list, full_response: str,
-                   conversation_id: str):
-    tps = token_count / elapsed if elapsed > 0 else 0
+                   prompt_tok: int, completion_tok: int, messages: list,
+                   full_response: str, conversation_id: str):
+    total_tokens = (prompt_tok or 0) + (completion_tok or 0)
+    tps = completion_tok / elapsed if elapsed > 0 and completion_tok else 0
 
     # Prometheus
     chat_requests_total.labels(provider=provider, model=model).inc()
     chat_latency_seconds.labels(provider=provider).observe(elapsed)
     tokens_per_second.labels(model=model).set(tps)
-    prompt_tokens.labels(provider=provider, model=model).inc(len(messages))
+    prompt_tokens_counter.labels(provider=provider, model=model).inc(prompt_tok or 0)
+    completion_tokens_counter.labels(provider=provider, model=model).inc(completion_tok or 0)
 
     # Langfuse v4 - correct API
     langfuse = get_client()
@@ -63,6 +71,8 @@ def record_metrics(provider: str, model: str, elapsed: float,
                 "conversation_id": conversation_id,
                 "latency_seconds": elapsed,
                 "tokens_per_second": tps,
-                "total_tokens": token_count
+                "prompt_tokens": prompt_tok,
+                "completion_tokens": completion_tok,
+                "total_tokens": total_tokens,
             }
         )

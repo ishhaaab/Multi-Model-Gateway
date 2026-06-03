@@ -1,7 +1,10 @@
+import re
+
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
+from app.core.config import settings
 from app.models.conversations import Conversation
 from app.models.messages import Message
 
@@ -42,6 +45,55 @@ async def get_message_by_index(conversation_id: str, index: int, db: AsyncSessio
     )
     return result.scalar_one_or_none()
 
+
+# ── Positional recall ──────────────────────────────────────────────
+# Semantic RAG can't serve ordinal queries ("the last 5 exchanges"), so we
+# detect them heuristically and fetch the recent turns verbatim. Additive: a
+# miss just falls back to the normal RAG + history-window path.
+MAX_RECALL_EXCHANGES = 20
+
+_NUM_WORDS = {
+    "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "couple": 2, "few": 3, "several": 5,
+}
+_RECALL_RE = re.compile(
+    r"\b(?:recall|remember|repeat|bring up|go back to|what (?:were|was|did))\b"
+    r"[^.?!]*?\b(?:last|previous|past|recent)\s+"
+    r"(\d{1,2}|a|an|one|two|three|four|five|six|seven|eight|nine|ten|couple|few|several)\s+"
+    r"(?:of\s+)?(?:my\s+|our\s+)?"
+    r"(?:messages?|exchanges?|turns?|replies|responses|prompts?|things)\b",
+    re.IGNORECASE,
+)
+
+
+def detect_recall_request(text: str) -> int | None:
+    """Return the requested exchange count for a positional-recall message
+    ("recall the last five messages"), else None."""
+    match = _RECALL_RE.search(text or "")
+    if not match:
+        return None
+    token = match.group(1).lower()
+    n = int(token) if token.isdigit() else _NUM_WORDS.get(token)
+    if not n:
+        return None
+    return max(1, min(n, MAX_RECALL_EXCHANGES))
+
+
+async def get_last_exchanges(conversation_id: str, n: int, db: AsyncSession) -> list[dict]:
+    """Last `n` exchanges (user + assistant turns) in chronological order.
+    An exchange spans two monotonic indices (user = k, assistant = k + 1)."""
+    max_index = (await db.execute(
+        select(func.max(Message.index)).where(Message.conversation_id == conversation_id)
+    )).scalar() or 0
+    cutoff = max_index - 2 * n
+    result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id, Message.index > cutoff)
+        .order_by(Message.index.asc())
+    )
+    return [{"role": m.role, "content": m.content} for m in result.scalars().all()]
+
     # by embedding:
 async def get_memory_context(conversation_id: str, query: str, db: AsyncSession) -> dict | None:
     memories = await retrieve_memories(conversation_id=conversation_id, query=query, db=db)
@@ -59,13 +111,16 @@ async def get_memory_context(conversation_id: str, query: str, db: AsyncSession)
 
 
 async def load_history(conversation_id: str, query: str, db: AsyncSession) -> list:
+    # Window to the most recent N messages so the prompt can't grow unbounded;
+    # older turns are still reachable through semantic memory RAG below.
     result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at.asc())
+        .order_by(Message.index.desc(), Message.created_at.desc())
+        .limit(settings.MAX_HISTORY_MESSAGES)
     )
-    messages = result.scalars().all()
-    recent = [{"role": m.role, "content": m.content} for m in messages]
+    rows = list(reversed(result.scalars().all()))
+    recent = [{"role": m.role, "content": m.content} for m in rows]
 
     context = await get_memory_context(conversation_id, query, db)
     if context:
@@ -79,14 +134,15 @@ async def save_messages(conversation_id: str, user_content: str, assistant_conte
     select(func.max(Message.index)).where(Message.conversation_id == conversation_id)
 )
     max_index = result.scalar() or 0
-    next_index  = int(max_index + 1)
-    
-    
+    user_index = int(max_index) + 1
+    assistant_index = user_index + 1
+
+
     user_msg = Message(
         conversation_id=conversation_id,
         role="user",
         content=user_content,
-        index= next_index
+        index= user_index
     )
     assistant_msg = Message(
         conversation_id=conversation_id,
@@ -94,7 +150,7 @@ async def save_messages(conversation_id: str, user_content: str, assistant_conte
         content=assistant_content,
         model_used=model,
         tokens_used= token_count,
-        index= next_index
+        index= assistant_index
     )
     db.add(user_msg)
     db.add(assistant_msg)

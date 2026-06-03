@@ -3,20 +3,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import chat, models, auth, convo, presets, templates, images
 from app.middleware.ratelimit import RateLimitMiddleware
 from app.core.redis import get_redis, close_redis
+from app.core.config import settings
 from prometheus_fastapi_instrumentator import Instrumentator
 
 
-app= FastAPI()
+_docs_enabled = settings.ENV != "production"
+app = FastAPI(
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
+)
 
 Instrumentator().instrument(app).expose(app)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # to accept requests from any origin
-    allow_credentials=True,
-    allow_methods=["*"],  #to accept any HTTP method (GET, POST, etc.)
-    allow_headers=["*"], # to accept any headers
-                   )
+    allow_origins=settings.allowed_origins_list,  # restrict to configured frontends
+    allow_credentials=False,                      # bearer tokens go in the Authorization header; no cookies
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.add_middleware(RateLimitMiddleware)
 

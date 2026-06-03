@@ -7,7 +7,10 @@ from alembic import context
 
 from app.core.config import settings
 from app.db import Base
-from app.models import users, conversations, messages, refresh_tokens
+from app.models import (
+    users, conversations, messages, refresh_tokens,
+    presets, templates, memories,
+)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
