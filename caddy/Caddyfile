@@ -1,18 +1,25 @@
 {
+	# Tailscale terminates TLS (via `tailscale serve`), so Caddy stays on plain :80.
 	auto_https off
 }
 
 :80 {
-	@api path /api/*
-	route @api {
+	# API to FastAPI backend (strip the /api prefix the SPA uses).
+	handle /api/* {
 		uri strip_prefix /api
 		reverse_proxy backend:8000
 	}
 
-	@websocket {
-		header Connection *Upgrade*
-		header Upgrade websocket
+	# Everything else to the built SPA. try_files gives client-side-routing
+	# fallback so deep links resolve to index.html.
+	# ComfyUI image previews: the SPA rewrites /view URLs to this same origin.
+	handle /view* {
+		reverse_proxy host.docker.internal:8188
 	}
-	reverse_proxy @websocket host.docker.internal:6969
-	reverse_proxy host.docker.internal:6969
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
 }

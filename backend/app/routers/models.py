@@ -12,8 +12,6 @@ router = APIRouter()
 async def list_local_models(user_id: str = Depends(get_current_user)):
     client = get_local_client()
     result = await client.models.list()
-    print("RAW RESULT:", result)
-    print("RAW DATA:", result.data)
     return {"data": [{"id": m.id, "object": "model"} for m in (result.data or [])]}
 
 
