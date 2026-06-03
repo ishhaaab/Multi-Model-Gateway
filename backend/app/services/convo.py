@@ -46,10 +46,9 @@ async def get_message_by_index(conversation_id: str, index: int, db: AsyncSessio
     return result.scalar_one_or_none()
 
 
-# ── Positional recall ──────────────────────────────────────────────
-# Semantic RAG can't serve ordinal queries ("the last 5 exchanges"), so we
-# detect them heuristically and fetch the recent turns verbatim. Additive: a
-# miss just falls back to the normal RAG + history-window path.
+# Positional recall
+# we detect last n exchanges and fetch the recent turns. 
+# Fallback: normal RAG + history-window path.
 MAX_RECALL_EXCHANGES = 20
 
 _NUM_WORDS = {
@@ -68,8 +67,7 @@ _RECALL_RE = re.compile(
 
 
 def detect_recall_request(text: str) -> int | None:
-    """Return the requested exchange count for a positional-recall message
-    ("recall the last five messages"), else None."""
+    """Return the requested exchange count for a positional recall message else None."""
     match = _RECALL_RE.search(text or "")
     if not match:
         return None
@@ -81,8 +79,8 @@ def detect_recall_request(text: str) -> int | None:
 
 
 async def get_last_exchanges(conversation_id: str, n: int, db: AsyncSession) -> list[dict]:
-    """Last `n` exchanges (user + assistant turns) in chronological order.
-    An exchange spans two monotonic indices (user = k, assistant = k + 1)."""
+    """Last `n` exchanges bw user & assistant in chronological order.
+    An exchange spans two monotonic indices w user = k and assistant = k + 1)."""
     max_index = (await db.execute(
         select(func.max(Message.index)).where(Message.conversation_id == conversation_id)
     )).scalar() or 0
@@ -112,7 +110,7 @@ async def get_memory_context(conversation_id: str, query: str, db: AsyncSession)
 
 async def load_history(conversation_id: str, query: str, db: AsyncSession) -> list:
     # Window to the most recent N messages so the prompt can't grow unbounded;
-    # older turns are still reachable through semantic memory RAG below.
+    # older turns are still reachable through semantic memory and positional recall.
     result = await db.execute(
         select(Message)
         .where(Message.conversation_id == conversation_id)

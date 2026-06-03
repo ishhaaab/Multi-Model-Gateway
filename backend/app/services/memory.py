@@ -33,7 +33,7 @@ async def get_embedding(content: str) -> list[float] | None:
 async def store_memory(conversation_id: str, role: str, content: str, db: AsyncSession):
     vector = await get_embedding(content)
     if vector is None:
-        return  # embedding unavailable; skip persisting this memory
+        return  # if embedding is unavailable then skip persisting this memory
     memory = Memory(
         id=uuid.uuid4(),
         conversation_id=conversation_id,
@@ -48,7 +48,7 @@ async def store_memory(conversation_id: str, role: str, content: str, db: AsyncS
 async def retrieve_memories(conversation_id: str, query: str, db: AsyncSession):
     query_vector = await get_embedding(query)
     if query_vector is None:
-        return []  # embedding unavailable; no memory context this turn
+        return []  # if embedding is unavailable then no memory context for this turn
     result = await db.execute(
         sa_text("SELECT content, role, created_at FROM memories WHERE conversation_id = :cid ORDER BY embedding <=> :emb LIMIT 3"),
         {"cid": conversation_id, "emb": str(query_vector)},

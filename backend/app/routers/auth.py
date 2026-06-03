@@ -74,7 +74,7 @@ async def login_user(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     query = await db.execute(select(User).where(User.email == user_data.email))
     user = query.scalar_one_or_none()
 
-    # Always run a verification (against a dummy hash when the user is absent)
+    # run a verification against a dummy hash when the user is absent
     # so login response time doesn't reveal whether the email is registered.
     hashed = user.hashed_password if user is not None else security.DUMMY_PASSWORD_HASH
     password_ok = security.verify_password(user_data.password, hashed)
@@ -104,7 +104,7 @@ class RefreshRequest(BaseModel):
 
 @router.post("/refresh")
 async def refresh_token(request: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    # find token in database (stored as a hash, not plaintext)
+    # find token in database stored as a hash
     token_hash = security.hash_token(request.refresh_token)
     query = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
     token_record = query.scalar_one_or_none()

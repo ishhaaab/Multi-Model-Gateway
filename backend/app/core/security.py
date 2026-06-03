@@ -23,7 +23,7 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 def hash_token(token: str) -> str:
-    """SHA-256 of a refresh token for at-rest storage (tokens are high-entropy)."""
+    """SHA-256 of a refresh token for at-rest storage as tokens are high-entropy"""
     return hashlib.sha256(token.encode()).hexdigest()
 
 def create_refresh_token(user_id: str, expires_at) -> str:
@@ -31,7 +31,7 @@ def create_refresh_token(user_id: str, expires_at) -> str:
         "sub": user_id,
         "exp": expires_at,
         "type": "refresh",
-        "jti": uuid.uuid4().hex,   # nonce so every refresh token (and its hash) is unique
+        "jti": uuid.uuid4().hex,   # nonce so every refresh token and its hash is unique
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 

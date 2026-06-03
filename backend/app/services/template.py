@@ -5,7 +5,11 @@ from app.models.templates import PromptTemplate
 from app.core.config import settings
 
 
-QUALITY_TAGS = "very aesthetic, (realistic skin:1.2), pores, shot on polaroid, shot on kodak, candid photo, (polaroid pic:0.8)"
+QUALITY_TAGS = "masterpiece, high quality, very aesthetic, 4k" 
+
+HUMAN_TAGS= "(realistic skin:1.2), pores"
+
+POLAROID_TAGS= "shot on polaroid, shot on kodak, candid photo, (polaroid pic:1.4)"
 
 
 DEFAULT_STRUCTURE = """
@@ -65,7 +69,8 @@ async def rewrite_prompt(prompt: str, template_id: str = None, db: AsyncSession 
                     "messages": [
                         {
                             "role": "system",
-"content": f"""You are an SDXL prompt engineer. Convert the user's natural language description into comma-separated tags.
+"content": f"""You are an SDXL prompt translator. You excel at converting the user's natural language description
+into comma separated weighted tags.
 
 Follow this category order:
 {structure}
@@ -74,12 +79,16 @@ Tagging Rules:
 - If the user emphasizes something with words like "make sure", "really", "extra", "must", "definitely", "very" or some other synonymns
 wrap those specific tag(s) with a weight like: (tag 1:weight), (tag 2:weight),.....(tag n:weight) where n= the no. of words user is emphasising on
 and tag= the words being emphasised
-.
+- if you think the user's request requires something to be weighted ie (has an importance of more than 1), 
+use (tag:weight) for that part of the request with an appropriate weight in the range of 1.2 to 1.8.
+
 - for the weight part in (tag(s):weight) use the following Weighing Rules:
-    - Use (tag n:1.3) for mild emphasis, (tag n:1.5) for strong emphasis, (tag n:1.8) for very strong emphasis
-    - Only weight tags that were explicitly emphasized
-- Do not include category names in the output
-- Return only comma separated tags, nothing else
+    - Use (tag: 1.3) for mild emphasis, (tag: 1.5) for strong emphasis, (tag: 1.8) for very strong emphasis
+    - Only weigh tags that were explicitly emphasized.
+
+- DO NOT have weights greater than 2 or less than 1.
+- Do NOT include category names in the output.
+- Return only comma separated tags, nothing else.
 
 """
                         },
@@ -93,6 +102,6 @@ and tag= the words being emphasised
             )
             response.raise_for_status()
             rewritten= response.json()["choices"][0]["message"]["content"].strip()
-            return f"{rewritten}, {QUALITY_TAGS}"
+            return f"{QUALITY_TAGS}, {rewritten}"
     finally:
         await unload_rewrite_model(instance_id)

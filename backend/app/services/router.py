@@ -45,7 +45,7 @@ async def get_provider(request: ChatRequest):
     code = ["script", "code", "function", "debug", "bug", "python", "c++", "java", "javascript", "typescript"]
     image= ["draw","image", "picture", "screenshot", "imagine"]
 
-    # user has model choice; fall back to the provider default if unset
+    # user has model choice. fall back to the provider default if unset
     local_model = request.model if request.model != 'auto' else (settings.LM_CHAT_MODEL or settings.LM_DEFAULT_MODEL)
     or_model    = request.model if request.model != 'auto' else settings.OPENROUTER_DEFAULT_MODEL
 
@@ -60,5 +60,8 @@ async def get_provider(request: ChatRequest):
             return get_openrouter_client(), or_model              # for coding tasks we use openrouter model
         case _ if len(request.messages) > 80:
             return get_openrouter_client(), or_model              # for long tasks, use openrouter model
+
+        # i have to add comfyui provider for image gen using image list        
+
         case _:
             return get_local_client(), local_model       

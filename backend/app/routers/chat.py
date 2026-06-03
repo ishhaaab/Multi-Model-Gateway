@@ -43,8 +43,7 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
     if preset and preset.system_prompt:
         system_prefix.append({"role": "system", "content": preset.system_prompt})
 
-    # Positional recall: if the user asked to recall the last N exchanges, fetch
-    # them verbatim (covers turns that may sit outside the default history window).
+    # Positional recall: if the user asked to recall the last N exchanges, fetch them verbatim 
     recall_n = detect_recall_request(request.messages[-1].content)
     if recall_n:
         exchanges = await get_last_exchanges(conversation_id, recall_n, db)
