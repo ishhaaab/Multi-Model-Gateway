@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useChatStore } from "@/stores/chat-store";
 import { useChat } from "@/hooks/use-chat";
 import { ChatHeader } from "@/components/chat/ChatHeader";
@@ -7,33 +7,27 @@ import { MessageList } from "@/components/chat/MessageList";
 import { ChatInput } from "@/components/chat/ChatInput";
 
 export default function ChatPage() {
-  const navigate = useNavigate();
   const { id: routeId } = useParams();
 
-  const activeConversationId = useChatStore((s) => s.activeConversationId);
   const messages = useChatStore((s) => s.messages);
   const loadingMessages = useChatStore((s) => s.loadingMessages);
 
   const { send, cancelStream, retryLast, isStreaming, streamedContent, streamError, pendingUserContent } =
     useChat();
 
-  // URL → store. Guard against re-fetching the conversation we're already on
-  // (which would wipe an in-flight stream right after auto-creation).
+  // The URL is the single source of truth for the active conversation.
+  // Auto-created conversations are pushed to the URL from useChat.send(), so
+  // there's no store→URL effect — that two-way sync was the loop-prone part.
+  // The `!== routeId` guard avoids re-fetching the conversation we're already
+  // on (which would wipe an in-flight stream right after auto-creation).
   useEffect(() => {
     const store = useChatStore.getState();
     if (routeId) {
       if (store.activeConversationId !== routeId) store.setActiveConversation(routeId);
-    } else {
+    } else if (store.activeConversationId !== null) {
       store.startNewChat();
     }
   }, [routeId]);
-
-  // store → URL. Reflect a freshly auto-created conversation in the address bar.
-  useEffect(() => {
-    if (activeConversationId && activeConversationId !== routeId) {
-      navigate(`/chat/${activeConversationId}`, { replace: true });
-    }
-  }, [activeConversationId, routeId, navigate]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">

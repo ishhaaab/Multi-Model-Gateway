@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useChatStore } from "@/stores/chat-store";
 import { apiClient } from "@/lib/api-client";
 import type { ChatRequest, Provider } from "@/lib/types";
@@ -15,6 +16,7 @@ function deriveTitle(content: string): string {
 }
 
 export function useChat() {
+  const navigate = useNavigate();
   const abortRef = useRef<AbortController | null>(null);
   const lastAttemptRef = useRef<{ content: string; options?: SendOptions } | null>(null);
   const [pendingUserContent, setPendingUserContent] = useState<string | null>(null);
@@ -35,6 +37,8 @@ export function useChat() {
     try {
       if (!conversationId) {
         conversationId = await store.createConversation("New Chat");
+        // Reflect the new conversation in the URL (replaces the old store→URL effect).
+        navigate(`/chat/${conversationId}`, { replace: true });
       }
     } catch {
       store.setStreamError("Could not start a conversation. Is the backend running?");
@@ -92,7 +96,7 @@ export function useChat() {
       },
       abortController.signal
     );
-  }, []);
+  }, [navigate]);
 
   const cancelStream = useCallback(() => {
     abortRef.current?.abort();

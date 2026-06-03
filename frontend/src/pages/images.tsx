@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ChevronDown,
   ImageIcon,
@@ -8,6 +8,7 @@ import {
   Copy,
   Check,
   AlertTriangle,
+  RotateCw,
   X,
   Trash2,
 } from "lucide-react";
@@ -16,10 +17,9 @@ import { toast } from "@/stores/ui-store";
 import { useImageGeneration } from "@/hooks/use-image";
 import type { CompletedGeneration } from "@/hooks/use-image";
 import type { ImageResult } from "@/lib/types";
+import { imageApi } from "@/lib/api-endpoints";
 import {
   cn,
-  ASPECT_RATIOS,
-  DEFAULT_ASPECT_RATIO,
   aspectRatioShort,
   getImageDisplayUrl,
   formatRelativeTime,
@@ -33,6 +33,7 @@ import { Slider } from "@/components/ui/Slider";
 import { Toggle } from "@/components/ui/Toggle";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { Spinner } from "@/components/ui/Spinner";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { Modal } from "@/components/ui/Modal";
 
 const NEG_DEFAULT = "text, watermark, blurry, low quality";
@@ -102,10 +103,15 @@ export default function ImagesPage() {
   const { generate, cancel, isGenerating, status, images, rewrittenPrompt, error } =
     useImageGeneration();
 
+  // aspect ratios — sourced from the backend (single source of truth)
+  const [aspectRatios, setAspectRatios] = useState<string[]>([]);
+  const [aspectLoading, setAspectLoading] = useState(true);
+  const [aspectError, setAspectError] = useState(false);
+
   // form
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState(NEG_DEFAULT);
-  const [aspect, setAspect] = useState<string>(DEFAULT_ASPECT_RATIO);
+  const [aspect, setAspect] = useState<string | null>(null);
   const [steps, setSteps] = useState(10);
   const [cfg, setCfg] = useState(1.2);
   const [templateId, setTemplateId] = useState<string>("");
@@ -121,6 +127,25 @@ export default function ImagesPage() {
   useEffect(() => {
     if (!hasLoadedTemplates) void fetchTemplates();
   }, [hasLoadedTemplates, fetchTemplates]);
+
+  const loadAspectRatios = useCallback(async () => {
+    setAspectLoading(true);
+    setAspectError(false);
+    try {
+      const { aspect_ratios, default: def } = await imageApi.aspectRatios();
+      setAspectRatios(aspect_ratios);
+      // Default the selection to the backend default (unless the user already picked).
+      setAspect((cur) => cur ?? def ?? aspect_ratios[0] ?? null);
+    } catch {
+      setAspectError(true);
+    } finally {
+      setAspectLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAspectRatios();
+  }, [loadAspectRatios]);
 
   const onComplete = (result: CompletedGeneration) => {
     setHistory(
@@ -145,7 +170,8 @@ export default function ImagesPage() {
         template_id: templateId || null,
         steps,
         cfg,
-        aspect_ratio: aspect,
+        // Omit when unknown so the backend applies its own default.
+        ...(aspect ? { aspect_ratio: aspect } : {}),
         batch_size: batchSize,
         seed: randomSeed ? null : seed.trim() ? Number(seed) : null,
         rewrite,
@@ -203,27 +229,51 @@ export default function ImagesPage() {
                   className="min-h-[60px]"
                 />
 
-                {/* Aspect ratio grid */}
+                {/* Aspect ratio grid (sourced from the backend) */}
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium text-text-secondary">Aspect Ratio</label>
-                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                    {ASPECT_RATIOS.map((r) => (
+                  {aspectLoading ? (
+                    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <Skeleton key={i} className="h-9 w-full" />
+                      ))}
+                    </div>
+                  ) : aspectError ? (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-bg-tertiary/50 px-3 py-2">
+                      <span className="text-[0.8125rem] text-text-muted">
+                        Couldn&apos;t load ratios — the backend default will be used.
+                      </span>
                       <button
-                        key={r}
-                        onClick={() => setAspect(r)}
-                        title={r}
-                        className={cn(
-                          "rounded-lg border px-2 py-2 text-[0.8125rem] transition-colors",
-                          aspect === r
-                            ? "border-accent-primary bg-accent-primary text-white"
-                            : "border-border bg-bg-tertiary text-text-secondary hover:text-text-primary"
-                        )}
+                        onClick={loadAspectRatios}
+                        className="flex items-center gap-1 text-[0.8125rem] text-accent-primary hover:underline"
                       >
-                        {aspectRatioShort(r)}
+                        <RotateCw size={13} /> Retry
                       </button>
-                    ))}
-                  </div>
-                  <span className="text-[0.75rem] text-text-muted">{aspect}</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                        {aspectRatios.map((r) => (
+                          <button
+                            key={r}
+                            onClick={() => setAspect(r)}
+                            title={r}
+                            className={cn(
+                              "rounded-lg border px-2 py-2 text-[0.8125rem] transition-colors",
+                              aspect === r
+                                ? "border-accent-primary bg-accent-primary text-white"
+                                : "border-border bg-bg-tertiary text-text-secondary hover:text-text-primary"
+                            )}
+                          >
+                            {aspectRatioShort(r)}
+                          </button>
+                        ))}
+                      </div>
+                      {aspect && (
+                        <span className="text-[0.75rem] text-text-muted">{aspect}</span>
+                      )}
+                    </>
+                  )}
                 </div>
 
                 <Slider label="Steps" value={steps} min={1} max={50} step={1} onChange={setSteps} />

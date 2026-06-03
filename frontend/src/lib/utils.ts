@@ -105,26 +105,10 @@ export const PROVIDER_DOT: Record<string, string> = {
 };
 
 /**
- * Aspect-ratio options forwarded verbatim to ComfyUI's ResolutionSelector node.
- * Add more by appending to this array — the UI and request both read from here.
+ * Short label for a ratio button, e.g. "9:16 (Portrait Widescreen)" → "9:16".
+ * The list of valid ratios is owned by the backend (GET /v1/images/aspect-ratios),
+ * not hardcoded here.
  */
-export const ASPECT_RATIOS = [
-  "1:1 (Square)",
-  "3:2 (Photo)",
-  "4:3 (Standard)",
-  "16:9 (Widescreen)",
-  "21:9 (Ultrawide)",
-  "2:3 (Portrait Photo)",
-  "3:4 (Portrait Standard)",
-  "9:16 (Portrait Widescreen)",
-] as const;
-
-export type AspectRatio = (typeof ASPECT_RATIOS)[number];
-
-// Backend default (backend/app/routers/images.py).
-export const DEFAULT_ASPECT_RATIO: AspectRatio = "9:16 (Portrait Widescreen)";
-
-/** Short label for a ratio button, e.g. "9:16 (Portrait Widescreen)" → "9:16". */
 export function aspectRatioShort(value: string): string {
   return value.split(" ")[0];
 }

@@ -13,7 +13,7 @@ interface AuthState {
   register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   forceLogout: () => void;
-  setAccessToken: (token: string) => void;
+  setTokens: (accessToken: string, refreshToken: string) => void;
   initializeAuth: () => Promise<void>;
 }
 
@@ -67,7 +67,7 @@ export const useAuthStore = create<AuthState>()(
         });
       },
 
-      setAccessToken: (token) => set({ accessToken: token }),
+      setTokens: (accessToken, refreshToken) => set({ accessToken, refreshToken }),
 
       initializeAuth: async () => {
         const { refreshToken } = get();
@@ -80,6 +80,7 @@ export const useAuthStore = create<AuthState>()(
           set({
             isAuthenticated: true,
             accessToken: res.access_token,
+            refreshToken: res.refresh_token,
             isInitializing: false,
           });
         } catch {

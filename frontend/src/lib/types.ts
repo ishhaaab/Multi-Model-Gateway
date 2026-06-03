@@ -17,6 +17,7 @@ export interface LoginResponse {
 
 export interface RefreshResponse {
   access_token: string;
+  refresh_token: string;
   token_type: string;
 }
 
@@ -151,6 +152,13 @@ export interface ImageResult {
 export interface ImageStatusResponse {
   status: "pending" | "complete";
   images?: ImageResult[];
+}
+
+// GET /v1/images/aspect-ratios — backend is the single source of truth for the
+// ResolutionSelector node's valid values.
+export interface AspectRatiosResponse {
+  aspect_ratios: string[];
+  default: string;
 }
 
 // ───────────── Models ─────────────

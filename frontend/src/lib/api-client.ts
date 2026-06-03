@@ -34,7 +34,7 @@ interface ApiClientConfig {
   apiPrefix: string;
   getAccessToken: () => string | null;
   getRefreshToken: () => string | null;
-  onRefresh: (token: string) => void;
+  onRefresh: (accessToken: string, refreshToken: string) => void;
   onAuthFailure: () => void;
 }
 
@@ -43,7 +43,7 @@ class ApiClient {
   private apiPrefix: string;
   private getAccessToken: () => string | null;
   private getRefreshToken: () => string | null;
-  private onRefresh: (token: string) => void;
+  private onRefresh: (accessToken: string, refreshToken: string) => void;
   private onAuthFailure: () => void;
 
   // Coalesce concurrent refreshes into a single in-flight request.
@@ -152,7 +152,9 @@ class ApiClient {
         });
         if (!response.ok) return false;
         const data = await response.json();
-        this.onRefresh(data.access_token);
+        // Backend rotates the refresh token on every use — persist the new one
+        // or the next refresh will fail with the now-invalidated old token.
+        this.onRefresh(data.access_token, data.refresh_token);
         return true;
       } catch {
         return false;
@@ -168,9 +170,9 @@ class ApiClient {
    * SSE streaming for chat.
    *
    * The backend frames each chunk as `data: <content>\n\n`, terminates with
-   * `data: [DONE]\n\n`, and (notably) emits errors WITHOUT a `data:` prefix
-   * (`ERROR: ...` or `Internal server error`). We parse on the `\n\n` event
-   * boundary so multi-line tokens survive, and detect both error shapes.
+   * `data: [DONE]\n\n`, and emits errors as `data: [ERROR] <msg>\n\n`. We parse
+   * on the `\n\n` event boundary so multi-line tokens survive, and still tolerate
+   * the legacy `ERROR:` / `Internal server error` shapes.
    */
   async streamChat(
     body: ChatRequest,
@@ -208,6 +210,10 @@ class ApiClient {
         const payload = event.slice(6);
         if (payload === "[DONE]") {
           onDone();
+          return true;
+        }
+        if (payload.startsWith("[ERROR]")) {
+          onError(payload.slice(7).trim() || "Something went wrong.");
           return true;
         }
         if (payload.startsWith("ERROR: ")) {
@@ -261,6 +267,6 @@ export const apiClient = new ApiClient({
   apiPrefix: import.meta.env.VITE_API_PREFIX || "",
   getAccessToken: () => useAuthStore.getState().accessToken,
   getRefreshToken: () => useAuthStore.getState().refreshToken,
-  onRefresh: (token) => useAuthStore.getState().setAccessToken(token),
+  onRefresh: (access, refresh) => useAuthStore.getState().setTokens(access, refresh),
   onAuthFailure: () => useAuthStore.getState().forceLogout(),
 });

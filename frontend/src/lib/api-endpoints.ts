@@ -15,6 +15,7 @@ import type {
   ImageGenerateRequest,
   ImageGenerateResponse,
   ImageStatusResponse,
+  AspectRatiosResponse,
   ListEnvelope,
   LocalModel,
   OpenRouterListResponse,
@@ -102,6 +103,9 @@ export const imageApi = {
 
   status: (promptId: string) =>
     apiClient.request<ImageStatusResponse>("GET", `/v1/images/status/${promptId}`),
+
+  aspectRatios: () =>
+    apiClient.request<AspectRatiosResponse>("GET", "/v1/images/aspect-ratios"),
 };
 
 // ───────────── Models ─────────────

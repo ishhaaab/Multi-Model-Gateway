@@ -53,27 +53,19 @@ src/
 ## Image generation — aspect ratios
 
 The `aspect_ratio` value is forwarded **verbatim** to ComfyUI's `ResolutionSelector`
-node, so the options must match the strings that node accepts. They live in a single
-array in `src/lib/utils.ts`:
+node, so the options must match the strings that node accepts. The list is **owned by
+the backend** (single source of truth) and fetched by the frontend — it is no longer
+hardcoded here.
 
-```ts
-export const ASPECT_RATIOS = [
-  "1:1 (Square)",
-  "3:2 (Photo)",
-  "4:3 (Standard)",
-  "16:9 (Widescreen)",
-  "21:9 (Ultrawide)",
-  "2:3 (Portrait Photo)",
-  "3:4 (Portrait Standard)",
-  "9:16 (Portrait Widescreen)",
-] as const;
+- Backend source: `ASPECT_RATIOS` / `DEFAULT_ASPECT_RATIO` in `backend/app/services/comfy.py`
+  (the image request also validates against it).
+- Endpoint: `GET /v1/images/aspect-ratios` → `{ "aspect_ratios": [...], "default": "..." }`.
+- Frontend: the image-gen page fetches this on mount (`imageApi.aspectRatios()`), renders
+  the button grid from it, and selects the returned default. If the fetch fails it shows a
+  retry and falls back to the backend's own default by omitting `aspect_ratio` from the request.
 
-// Backend default (backend/app/routers/images.py)
-export const DEFAULT_ASPECT_RATIO: AspectRatio = "9:16 (Portrait Widescreen)";
-```
-
-**To add more ratios:** append the exact node string to `ASPECT_RATIOS`. The image-gen
-button grid and the generate request both read from this array — nothing else to change.
+**To add more ratios:** append the exact node string to `ASPECT_RATIOS` in the backend —
+nothing to change on the frontend.
 
 ## Backend behaviors the UI relies on
 
