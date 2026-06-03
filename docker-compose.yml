@@ -4,7 +4,7 @@ services:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ishaab 
-      POSTGRES_PASSWORD: ishaab27
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: llmgateway 
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -13,13 +13,18 @@ services:
     image: redis:7-alpine
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      target: dev
     ports:
       - "2727:8000"
     volumes:
       - ./backend:/app
     env_file:
       - .env
+    secrets:
+      - ollama_api_key
+      - openrouter_api_key
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -37,7 +42,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
     volumes:
       - grafana-data:/var/lib/grafana
 
@@ -47,6 +52,7 @@ services:
       - "80:80"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+      - ./frontend/dist:/srv          # built SPA served by Caddy (run `npm run build` first)
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -56,3 +62,10 @@ services:
 volumes:
   pgdata:
   grafana-data:
+
+
+secrets:
+  ollama_api_key:
+    file: ./secrets/ollama_api_key.txt
+  openrouter_api_key:
+    file: ./secrets/openrouter_api_key.txt
