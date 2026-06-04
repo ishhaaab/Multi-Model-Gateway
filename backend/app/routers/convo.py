@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, status, Depends
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, exists
 
 from app.db import get_db
 from app.core import security
@@ -29,7 +29,13 @@ async def convo_create(convo_data: ConvoCreate, db: AsyncSession = Depends(get_d
 
 @router.get("/convo")
 async def convo_get(db: AsyncSession = Depends(get_db), user_id= Depends(security.get_current_user)):
-    query= await db.execute(select(Conversation).where(Conversation.user_id== user_id))
+    # list conversations that actually have messages and hide orphans left behind 
+    # when a send fails before the model responds.
+    query= await db.execute(
+        select(Conversation)
+        .where(Conversation.user_id== user_id)
+        .where(exists().where(Message.conversation_id == Conversation.id))
+    )
     conversations = query.scalars().all()
     return conversations
 

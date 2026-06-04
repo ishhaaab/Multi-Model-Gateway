@@ -7,7 +7,10 @@
 	# API to FastAPI backend (strip the /api prefix the SPA uses).
 	handle /api/* {
 		uri strip_prefix /api
-		reverse_proxy backend:8000
+		reverse_proxy backend:8000 {
+			# Flush each write immediately so SSE token streaming isn't buffered.
+			flush_interval -1
+		}
 	}
 
 	# Everything else to the built SPA. try_files gives client-side-routing

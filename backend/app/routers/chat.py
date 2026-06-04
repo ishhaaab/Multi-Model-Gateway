@@ -22,11 +22,20 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 async def load_preset(preset_id, user_id, db: AsyncSession):
-    if not preset_id:
-        return None
-    result = await db.execute(
-        select(Preset).where(Preset.id == preset_id, Preset.user_id == user_id)
-    )
+    if preset_id:
+        result = await db.execute(
+            select(Preset).where(Preset.id == preset_id, Preset.user_id == user_id)
+        )
+    else:
+        # if no preset is chosen, we fall back to the user's "Default" preset that is created at
+        # user reg. If preset is missing, we return None and stream_tokens uses
+        # the hardcoded safe defaults.
+        result = await db.execute(
+            select(Preset)
+            .where(Preset.user_id == user_id, Preset.name == "Default")
+            .order_by(Preset.created_at.asc())
+            .limit(1)
+        )
     return result.scalar_one_or_none()
 
 
@@ -59,16 +68,22 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
         messages = system_prefix + messages
 
     client, model = await get_provider(request)
+    is_cloud = "openrouter" in str(client.base_url).lower()
     start_time = time.time()
     token_count = 0
     full_response = ""
 
 
-    extra_params = {}
-    if request.provider == Provider.local or request.provider == Provider.auto:
+    if is_cloud:
+        # Cloud providers report accurate usage in the final stream chunk.
+        extra_params = {"stream_options": {"include_usage": True}}
+    else:
+        # LM Studio has sampling params via extra_body. We do NOT send
+        # stream_options as some LM Studio builds stop streaming token-by-token
+        # when it's present (usage then falls back to the streamed-chunk count).
         extra_params = {
             "extra_body": {
-                "top_k": preset.top_k if preset else 0.95,
+                "top_k": preset.top_k if (preset and preset.top_k is not None) else 40,
                 "min_p": preset.min_p if preset else 0.05,
                 "repeat_penalty": preset.repeat_penalty if preset and preset.repeat_penalty and preset.repeat_penalty > 0 else 1.10
             }
@@ -79,7 +94,6 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
             model=model,
             messages=messages,
             stream=True,
-            stream_options={"include_usage": True},
             temperature=preset.temperature if preset else 0.8,
             max_tokens=preset.token_limit if preset and preset.token_limit and preset.token_limit > 0 else None,
             stop=preset.stop_strings if preset else None,
@@ -129,5 +143,9 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
 async def chat_completions(request: ChatRequest, db: AsyncSession = Depends(get_db), user_id=Depends(get_current_user)):
     return StreamingResponse(
         stream_tokens(request, user_id, db),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # disable proxy buffering (nginx) as Caddy uses flush_interval
+        },
     )
