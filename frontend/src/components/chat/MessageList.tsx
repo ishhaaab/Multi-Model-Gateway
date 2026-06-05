@@ -23,10 +23,26 @@ export function MessageList({
   streamError,
   onRetry,
 }: MessageListProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const stickRef = useRef(true);
+  const prevPendingRef = useRef<string | null>(null);
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // "stuck to bottom" if within 80px of the end
+    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Re-engage following only on a *new* user turn — NOT on every streamed
+    // token (pendingUserContent stays set for the whole stream). Otherwise
+    // honor the user's scroll position so they can scroll up mid-stream.
+    const justSent = !!pendingUserContent && !prevPendingRef.current;
+    prevPendingRef.current = pendingUserContent;
+    if (justSent) stickRef.current = true;
+    if (stickRef.current) bottomRef.current?.scrollIntoView({ behavior: "auto" });
   }, [messages.length, streamedContent, pendingUserContent, isStreaming]);
 
   if (loading && messages.length === 0) {
@@ -57,7 +73,7 @@ export function MessageList({
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
         {messages.map((m) => (
           <MessageBubble

@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Slider } from "@/components/ui/Slider";
-import { Dropdown } from "@/components/ui/Dropdown";
 import { StopStrings } from "@/components/ui/StopStrings";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -25,7 +24,6 @@ interface FormState {
   min_p: number;
   repeat_penalty: number;
   token_limit: string; // empty = unlimited
-  context_overflow: string;
   stop_strings: string[];
 }
 
@@ -38,7 +36,6 @@ const NEW_FORM: FormState = {
   min_p: 0.05,
   repeat_penalty: 1.1,
   token_limit: "",
-  context_overflow: "truncate_middle",
   stop_strings: [],
 };
 
@@ -52,7 +49,6 @@ function presetToForm(p: Preset): FormState {
     min_p: p.min_p ?? 0.05,
     repeat_penalty: p.repeat_penalty ?? 1.1,
     token_limit: p.token_limit != null ? String(p.token_limit) : "",
-    context_overflow: p.context_overflow ?? "truncate_middle",
     stop_strings: p.stop_strings ?? [],
   };
 }
@@ -101,7 +97,6 @@ export default function PresetsPage() {
     min_p: form.min_p,
     repeat_penalty: form.repeat_penalty,
     token_limit: form.token_limit.trim() ? Number(form.token_limit) : null,
-    context_overflow: form.context_overflow,
     stop_strings: form.stop_strings.length ? form.stop_strings : null,
   });
 
@@ -229,10 +224,11 @@ export default function PresetsPage() {
         label="Temperature"
         value={form.temperature}
         min={0}
-        max={2}
+        max={1}
         step={0.1}
+        inputMax={Infinity}
         onChange={(v) => set("temperature", v)}
-        endLabels={["Precise (0.0)", "Creative (2.0)"]}
+        endLabels={["Precise (0.0)", "Creative (1.0)"]}
       />
 
       <Slider
@@ -270,6 +266,7 @@ export default function PresetsPage() {
         min={0}
         max={2}
         step={0.01}
+        inputMax={Infinity}
         onChange={(v) => set("repeat_penalty", v)}
         hint="Higher values reduce repetition"
       />
@@ -283,16 +280,6 @@ export default function PresetsPage() {
         placeholder="∞"
         hint="Leave empty for unlimited"
       />
-
-      <div className="flex flex-col gap-1">
-        <label className="text-sm font-medium text-text-secondary">Context Overflow</label>
-        <Dropdown
-          value={form.context_overflow}
-          options={[{ value: "truncate_middle", label: "truncate_middle" }]}
-          onChange={(v) => set("context_overflow", v)}
-          className="w-full max-w-xs"
-        />
-      </div>
 
       <StopStrings value={form.stop_strings} onChange={(v) => set("stop_strings", v)} />
 

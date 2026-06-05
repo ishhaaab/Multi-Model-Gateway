@@ -111,6 +111,12 @@ h3 {
   border-radius: 6px;
 }
 
+/* The chat composer shows its own focus ring on the wrapper, so the message
+   textarea inside it shouldn't also get the global per-field focus outline. */
+.gw-composer textarea:focus-visible {
+  outline: none;
+}
+
 ::selection {
   background: rgba(255, 101, 63, 0.3);
   color: var(--color-text-primary);

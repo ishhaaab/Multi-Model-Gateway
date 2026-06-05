@@ -22,6 +22,8 @@ interface DropdownProps {
   /** Open the menu upward (useful for bottom-anchored toolbars). */
   up?: boolean;
   size?: "sm" | "md";
+  /** Transparent trigger with a coral hover fill (for the composer toolbar). */
+  transparent?: boolean;
 }
 
 export function Dropdown({
@@ -35,6 +37,7 @@ export function Dropdown({
   align = "left",
   up = false,
   size = "md",
+  transparent = false,
 }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -62,8 +65,10 @@ export function Dropdown({
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-bg-secondary",
-          "text-text-primary transition-colors hover:bg-bg-tertiary outline-none",
+          "flex w-full items-center justify-between gap-2 rounded-lg border text-text-primary transition-colors outline-none",
+          transparent
+            ? "border-transparent bg-transparent hover:bg-accent-primary hover:text-white"
+            : "border-border bg-bg-secondary hover:bg-bg-tertiary",
           trigger
         )}
       >

@@ -35,6 +35,7 @@ interface ChatState {
 
   // Compose selections shared by header + input bar
   provider: Provider;
+  model: string;
   presetId: string | null;
   isPrivate: boolean;
 
@@ -52,6 +53,7 @@ interface ChatState {
   setStreamError: (err: string | null) => void;
 
   setProvider: (p: Provider) => void;
+  setModelSelection: (provider: Provider, model: string) => void;
   setPresetId: (id: string | null) => void;
   setPrivate: (v: boolean) => void;
 }
@@ -67,6 +69,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   loadingMessages: false,
 
   provider: "auto",
+  model: "auto",
   presetId: null,
   isPrivate: false,
 
@@ -142,6 +145,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setStreamError: (err) => set({ streamError: err }),
 
   setProvider: (p) => set({ provider: p }),
+  setModelSelection: (provider, model) => set({ provider, model }),
   setPresetId: (id) => set({ presetId: id }),
   setPrivate: (v) => set({ isPrivate: v }),
 }));

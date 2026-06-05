@@ -3,16 +3,10 @@ import type { KeyboardEvent } from "react";
 import { ArrowUp, Square, Lock } from "lucide-react";
 import { useChatStore } from "@/stores/chat-store";
 import { usePresetStore } from "@/stores/preset-store";
-import type { Provider } from "@/lib/types";
-import { cn, PROVIDER_DOT } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { Dropdown } from "@/components/ui/Dropdown";
 import type { DropdownOption } from "@/components/ui/Dropdown";
-
-const PROVIDER_OPTIONS: DropdownOption[] = [
-  { value: "auto", label: "Auto", dotColor: PROVIDER_DOT.auto },
-  { value: "local", label: "Local", dotColor: PROVIDER_DOT.local },
-  { value: "openrouter", label: "OpenRouter", dotColor: PROVIDER_DOT.openrouter },
-];
+import { ModelSelector } from "@/components/chat/ModelSelector";
 
 const MAX_TEXTAREA_HEIGHT = 168; // ~6 lines
 
@@ -26,8 +20,6 @@ export function ChatInput({ onSend, onCancel, isStreaming }: ChatInputProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const provider = useChatStore((s) => s.provider);
-  const setProvider = useChatStore((s) => s.setProvider);
   const presetId = useChatStore((s) => s.presetId);
   const setPresetId = useChatStore((s) => s.setPresetId);
   const isPrivate = useChatStore((s) => s.isPrivate);
@@ -42,12 +34,14 @@ export function ChatInput({ onSend, onCancel, isStreaming }: ChatInputProps) {
   }, [value]);
 
   const presetOptions: DropdownOption[] = [
-    { value: "", label: "No preset", sublabel: "Use defaults" },
-    ...presets.map((p) => ({
-      value: p.id,
-      label: p.name,
-      sublabel: `temp ${p.temperature}`,
-    })),
+    { value: "", label: "Default preset" },
+    ...presets
+      .filter((p) => p.name !== "Default")
+      .map((p) => ({
+        value: p.id,
+        label: p.name,
+        sublabel: `temp ${p.temperature}`,
+      })),
   ];
 
   const submit = () => {
@@ -68,43 +62,9 @@ export function ChatInput({ onSend, onCancel, isStreaming }: ChatInputProps) {
 
   return (
     <div className="border-t border-border bg-bg-secondary/70 px-4 py-3">
-      <div className="mx-auto w-full max-w-3xl">
-        {/* Toolbar */}
-        <div className="mb-2 flex items-center gap-2">
-          <Dropdown
-            value={provider}
-            options={PROVIDER_OPTIONS}
-            onChange={(v) => setProvider(v as Provider)}
-            size="sm"
-            up
-            className="w-[140px]"
-          />
-          <Dropdown
-            value={presetId ?? ""}
-            options={presetOptions}
-            onChange={(v) => setPresetId(v || null)}
-            size="sm"
-            up
-            className="w-[170px]"
-          />
-          <button
-            type="button"
-            onClick={() => setPrivate(!isPrivate)}
-            title="Private mode — forces the request to the local provider only"
-            className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-lg border transition-colors",
-              isPrivate
-                ? "border-accent-secondary/50 bg-accent-secondary/10 text-accent-secondary"
-                : "border-border bg-bg-secondary text-text-muted hover:text-text-primary hover:bg-bg-tertiary"
-            )}
-            aria-pressed={isPrivate}
-          >
-            <Lock size={15} />
-          </button>
-        </div>
-
-        {/* Input row */}
-        <div className="flex items-end gap-2 rounded-xl border border-border bg-bg-secondary px-3 py-2 focus-within:ring-2 focus-within:ring-accent-primary/70">
+      <div className="mx-auto w-full max-w-4xl">
+        {/* Composer — one box, one focus highlight; controls live inside it */}
+        <div className="gw-composer flex flex-col gap-2 rounded-xl border border-transparent bg-bg-secondary px-3 py-2.5 transition-shadow hover:ring-2 hover:ring-accent-primary/70 focus-within:ring-2 focus-within:ring-accent-primary/70">
           <textarea
             ref={textareaRef}
             value={value}
@@ -113,33 +73,66 @@ export function ChatInput({ onSend, onCancel, isStreaming }: ChatInputProps) {
             disabled={isStreaming}
             rows={1}
             placeholder={isStreaming ? "Generating…" : "Message…"}
-            className="flex-1 resize-none bg-transparent py-1.5 text-[0.9375rem] text-text-primary placeholder:text-text-muted outline-none disabled:opacity-60"
+            className="w-full resize-none bg-transparent py-1.5 text-[0.9375rem] text-text-primary placeholder:text-text-muted outline-none focus-visible:outline-none disabled:opacity-60"
           />
-          {isStreaming ? (
+
+          <div className="flex items-center gap-2">
+            {/* left: privacy + model */}
             <button
               type="button"
-              onClick={onCancel}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-bg-tertiary text-text-primary transition-colors hover:bg-bg-elevated"
-              aria-label="Stop generating"
-            >
-              <Square size={15} className="fill-current" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={submit}
-              disabled={!canSend}
+              onClick={() => setPrivate(!isPrivate)}
+              title="Private mode — forces the request to the local provider only"
               className={cn(
-                "flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-150",
-                canSend
-                  ? "bg-accent-primary text-white hover:brightness-110 active:scale-95"
-                  : "bg-bg-tertiary text-text-muted"
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-transparent transition-colors",
+                isPrivate
+                  ? "bg-accent-secondary/15 text-accent-secondary"
+                  : "bg-transparent text-text-muted hover:bg-accent-primary hover:text-white"
               )}
-              aria-label="Send message"
+              aria-pressed={isPrivate}
             >
-              <ArrowUp size={17} />
+              <Lock size={15} />
             </button>
-          )}
+            <ModelSelector />
+
+            {/* right: preset · send */}
+            <div className="ml-auto flex items-center gap-2">
+              <Dropdown
+                value={presetId ?? ""}
+                options={presetOptions}
+                onChange={(v) => setPresetId(v || null)}
+                size="sm"
+                up
+                align="right"
+                transparent
+                className="w-[160px]"
+              />
+              {isStreaming ? (
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-primary text-white transition-[filter] hover:brightness-110"
+                  aria-label="Stop generating"
+                >
+                  <Square size={14} className="fill-current" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={submit}
+                  disabled={!canSend}
+                  className={cn(
+                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors",
+                    canSend
+                      ? "bg-accent-primary text-white hover:brightness-110"
+                      : "bg-transparent text-text-muted"
+                  )}
+                  aria-label="Send message"
+                >
+                  <ArrowUp size={16} />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         {isStreaming && (

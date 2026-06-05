@@ -57,8 +57,8 @@ export function useChat() {
       conversation_id: conversationId,
       preset_id: options?.presetId !== undefined ? options.presetId : store.presetId,
       messages: [{ role: "user", content }],
-      // Critical: backend only auto-routes when model === "auto".
-      model: "auto",
+      // "auto" lets the backend route by provider; a specific id pins the model.
+      model: store.model,
       stream: true,
       provider: options?.provider ?? store.provider,
       private: options?.private ?? store.isPrivate,
