@@ -14,7 +14,13 @@ from app.core.metrics import record_metrics
 from app.services.convo import conversation, load_history, save_messages, get_last_exchanges, detect_recall_request
 from app.services.router import get_provider, ChatRequest, Provider
 
-from app.models.presets import Preset
+from app.models.presets import (
+    Preset,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_TOP_K,
+    DEFAULT_MIN_P,
+    DEFAULT_REPEAT_PENALTY,
+)
 
 
 router = APIRouter()
@@ -83,9 +89,9 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
         # when it's present (usage then falls back to the streamed-chunk count).
         extra_params = {
             "extra_body": {
-                "top_k": preset.top_k if (preset and preset.top_k is not None) else 40,
-                "min_p": preset.min_p if preset else 0.05,
-                "repeat_penalty": preset.repeat_penalty if preset and preset.repeat_penalty and preset.repeat_penalty > 0 else 1.10
+                "top_k": preset.top_k if (preset and preset.top_k is not None) else DEFAULT_TOP_K,
+                "min_p": preset.min_p if preset else DEFAULT_MIN_P,
+                "repeat_penalty": preset.repeat_penalty if preset and preset.repeat_penalty and preset.repeat_penalty > 0 else DEFAULT_REPEAT_PENALTY
             }
         }
 
@@ -94,7 +100,7 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
             model=model,
             messages=messages,
             stream=True,
-            temperature=preset.temperature if preset else 0.8,
+            temperature=preset.temperature if preset else DEFAULT_TEMPERATURE,
             max_tokens=preset.token_limit if preset and preset.token_limit and preset.token_limit > 0 else None,
             stop=preset.stop_strings if preset else None,
             top_p=preset.top_p if preset else None,

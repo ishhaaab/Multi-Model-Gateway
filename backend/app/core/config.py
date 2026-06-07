@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     LM_DEFAULT_MODEL: str
     LM_CHAT_MODEL: str = ""   # default chat model on LM Studio; empty => falls back to LM_DEFAULT_MODEL
 
+    COMFY_URL: str = "http://host.docker.internal:8188"   # ComfyUI server for image generation
+
     
     APP_HOST: str = "0.0.0.0"
     APP_PORT:int=8008

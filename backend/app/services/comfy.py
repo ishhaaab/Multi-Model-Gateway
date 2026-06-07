@@ -1,14 +1,14 @@
 import httpx
-import json
 import uuid
 import copy
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.workflows import Workflow
 from app.core.exceptions import NotFoundError
+from app.core.config import settings
 
 
-COMFY_URL = "http://host.docker.internal:8188"
+COMFY_URL = settings.COMFY_URL
 
 # Valid aspect_ratio values accepted by the ComfyUI ResolutionSelector node (id "17").
 # Single source of truth: the frontend fetches these via GET /v1/images/aspect-ratios,

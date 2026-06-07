@@ -15,8 +15,9 @@ from app.core.config import settings
 from app.models.users import User
 from app.models.refresh_tokens import RefreshToken
 
-from app.models.presets import Preset
+from app.models.presets import Preset, DEFAULT_TEMPERATURE, DEFAULT_CONTEXT_OVERFLOW
 from app.models.templates import PromptTemplate
+from app.services.template import DEFAULT_STRUCTURE
 import uuid
 
 class UserCreate(BaseModel):
@@ -42,8 +43,8 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
         id=uuid.uuid4(),
         user_id=new_user.id,
         name="Default",
-        temperature=0.8,
-        context_overflow="truncate_middle",
+        temperature=DEFAULT_TEMPERATURE,
+        context_overflow=DEFAULT_CONTEXT_OVERFLOW,
         )
     db.add(default_preset)
     
@@ -53,14 +54,7 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
         user_id=new_user.id,
         name="Default SDXL Template",
         description="Default structure for SDXL prompt rewriting",
-        structure="""quality,
-        art style, artist references,
-        camera,
-        subject,
-        accessories and clothes,
-        pose,
-        environment,
-        lighting"""
+        structure=DEFAULT_STRUCTURE,
         )
     db.add(default_template)
     

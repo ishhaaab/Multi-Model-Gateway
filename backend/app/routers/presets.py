@@ -8,21 +8,29 @@ import uuid
 
 from app.db import get_db
 from app.core.security import get_current_user
-from app.models.presets import Preset
+from app.models.presets import (
+    Preset,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_TOP_P,
+    DEFAULT_TOP_K,
+    DEFAULT_MIN_P,
+    DEFAULT_REPEAT_PENALTY,
+    DEFAULT_CONTEXT_OVERFLOW,
+)
 
 router = APIRouter()
 
 class PresetCreate(BaseModel):
     name: str
     system_prompt: Optional[str] = None
-    temperature: Optional[float] = 0.8
+    temperature: Optional[float] = DEFAULT_TEMPERATURE
     token_limit: Optional[int] = None
-    context_overflow: Optional[str] = "truncate_middle"
+    context_overflow: Optional[str] = DEFAULT_CONTEXT_OVERFLOW
     stop_strings: Optional[list[str]] = None
-    top_k: Optional[int] = 40
-    top_p: Optional[float] = 0.95
-    min_p: Optional[float] = 0.05
-    repeat_penalty: Optional[float] = 1.10
+    top_k: Optional[int] = DEFAULT_TOP_K
+    top_p: Optional[float] = DEFAULT_TOP_P
+    min_p: Optional[float] = DEFAULT_MIN_P
+    repeat_penalty: Optional[float] = DEFAULT_REPEAT_PENALTY
 
 class PresetUpdate(BaseModel):
     name: Optional[str] = None
