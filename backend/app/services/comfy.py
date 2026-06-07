@@ -2,6 +2,11 @@ import httpx
 import json
 import uuid
 import copy
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.models.workflows import Workflow
+from app.core.exceptions import NotFoundError
+
 
 COMFY_URL = "http://host.docker.internal:8188"
 
@@ -83,25 +88,118 @@ BASE_WORKFLOW = {
     }
 }
 
-async def generate_image(
-    prompt: str,
-    negative_prompt: str = "text, watermark, blurry, low quality",
-    steps: int = 10,
-    cfg: float = 1.2,
-    aspect_ratio: str = DEFAULT_ASPECT_RATIO,
-    batch_size: int = 1,
-    seed: int = None
-) -> str:
-    workflow = copy.deepcopy(BASE_WORKFLOW)
+async def get_workflow(workflow_id: str, user_id: str, db: AsyncSession):
+    if not workflow_id:
+        return BASE_WORKFLOW, None
+    request= await db.execute(select(Workflow).where(
+        Workflow.id == workflow_id,
+        Workflow.user_id == user_id))
     
-    # inject parameters
-    workflow["6"]["inputs"]["text"] = prompt
-    workflow["7"]["inputs"]["text"] = negative_prompt
-    workflow["3"]["inputs"]["steps"] = steps
-    workflow["3"]["inputs"]["cfg"] = cfg
-    workflow["3"]["inputs"]["seed"] = seed or uuid.uuid4().int % (2**32)
-    workflow["17"]["inputs"]["aspect_ratio"] = aspect_ratio
-    workflow["18"]["inputs"]["batch_size"] = batch_size
+    workflow= request.scalar_one_or_none()
+    if workflow is None:
+        raise NotFoundError("Workflow not found")
+    return workflow.graph, workflow.param_map
+    
+
+# find the first node whose class_type contains X (here we use a substring match) 
+def _find_node(graph, class_substr):
+    for node_id, node in graph.items():
+        if class_substr in node.get("class_type", ""):
+            return node_id, node
+    return None, None
+
+def inject_params(
+    graph: dict,
+    param_map: dict | None = None,
+    *,
+    prompt: str,
+    negative_prompt: str,
+    steps: int,
+    cfg: float,
+    seed: int,
+    aspect_ratio: str,
+    batch_size: int,
+) -> dict:
+    
+    g= copy.deepcopy(graph)
+    targets= {}
+
+    # auto-detect: to figure out which node + input each param maps to
+    # Anchor on the sampler; steps/cfg/seed sit right on it.
+    sampler_id, sampler = _find_node(g, "KSampler")
+    if sampler:
+        s_inputs = sampler["inputs"]
+        targets["steps"] = [sampler_id, "steps"]
+        targets["cfg"] = [sampler_id, "cfg"]
+        # KSampler calls it "seed"; KSamplerAdvanced calls it "noise_seed"
+        targets["seed"] = [sampler_id, "noise_seed" if "noise_seed" in s_inputs else "seed"]
+        # positive/negative are links like ["node_id", "input_slot"] and
+        # the prompt text lives on that node's "text"
+        if "positive" in s_inputs:
+            targets["positive"] = [s_inputs["positive"][0], "text"]
+        if "negative" in s_inputs:
+            targets["negative"] = [s_inputs["negative"][0], "text"]
+
+    # aspect ratio + batch size have their own nodes 
+    res_id, _ = _find_node(g, "ResolutionSelector")
+    if res_id:
+        targets["aspect_ratio"] = [res_id, "aspect_ratio"]
+
+    latent_id, _ = _find_node(g, "LatentImage")
+    if latent_id:
+        targets["batch_size"] = [latent_id, "batch_size"]
+
+    # explicit overrides from the workflow's param_map have priority
+    # over auto-detect
+    targets.update(param_map or {})
+    values= {
+        "positive": prompt,
+        "negative": negative_prompt,
+        "steps": steps,
+        "cfg": cfg,
+        "seed": seed,
+        "aspect_ratio": aspect_ratio,
+        "batch_size": batch_size}
+    
+    for param, value in values.items():
+        target = targets.get(param)
+        if not target:
+            continue                      # if this graph has no slot for that param then skip, don't crash
+        node_id, input_key = target       # target is [node_id, input_slot]
+        if node_id in g and "inputs" in g[node_id]:
+            g[node_id]["inputs"][input_key] = value
+
+    return g
+
+
+async def generate_image(
+    workflow_id: str | None,
+    user_id: str,
+    db: AsyncSession,
+    *,
+    prompt: str,
+    negative_prompt: str,
+    steps: int,
+    cfg: float,
+    aspect_ratio: str,
+    batch_size: int,
+    seed: int | None = None,
+) -> str:
+    
+    graph, param_map = await get_workflow(workflow_id, user_id, db)
+    seed = seed if seed is not None else uuid.uuid4().int % (2**32)
+
+    workflow = inject_params(
+        graph,
+        param_map,
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        steps=steps,
+        cfg=cfg,
+        seed=seed,
+        aspect_ratio=aspect_ratio,
+        batch_size=batch_size,
+    )
 
     client_id = str(uuid.uuid4())
 

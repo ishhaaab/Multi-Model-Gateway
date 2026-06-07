@@ -1,10 +1,10 @@
 import re
 
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.core.config import settings
+from app.core.exceptions import NotFoundError, ForbiddenError
 from app.models.conversations import Conversation
 from app.models.messages import Message
 
@@ -25,10 +25,10 @@ async def conversation(request, user_id: str, db: AsyncSession) -> str:
         conversation = query.scalar_one_or_none()
 
         if conversation is None:
-            raise HTTPException(status_code=404, detail="conversation not found")
+            raise NotFoundError("conversation not found")
 
         if str(conversation.user_id) != str(user_id):
-            raise HTTPException(status_code=403, detail="unauthorised user")
+            raise ForbiddenError("unauthorised user")
 
         return str(conversation.id)
 

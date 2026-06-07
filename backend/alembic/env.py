@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.db import Base
 from app.models import (
     users, conversations, messages, refresh_tokens,
-    presets, templates, memories,
+    presets, templates, memories, workflows
 )
 
 # this is the Alembic Config object, which provides

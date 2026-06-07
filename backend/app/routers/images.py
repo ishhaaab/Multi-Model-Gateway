@@ -19,6 +19,7 @@ class ImageRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
     negative_prompt: Optional[str] = Field(default="text, watermark, blurry, low quality", max_length=4000)
     template_id: Optional[str] = None
+    workflow_id: Optional[str] = None
     steps: int = Field(default=10, ge=1, le=50)
     cfg: float = Field(default=1.2, ge=0, le=20)
     aspect_ratio: str = Field(default=DEFAULT_ASPECT_RATIO)
@@ -42,13 +43,16 @@ async def generate(request: ImageRequest, db: AsyncSession = Depends(get_db), us
         prompt = await rewrite_prompt(request.prompt, request.template_id, db, user_id)
 
     prompt_id = await generate_image(
+        request.workflow_id,
+        user_id,
+        db,
         prompt=prompt,
         negative_prompt=request.negative_prompt,
         steps=request.steps,
         cfg=request.cfg,
         aspect_ratio=request.aspect_ratio,
         batch_size=request.batch_size,
-        seed=request.seed
+        seed=request.seed,
     )
 
     # remember who owns this job so status lookups can be authorised

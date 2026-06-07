@@ -1,9 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import chat, models, auth, convo, presets, templates, images
+from fastapi.responses import JSONResponse
+from app.routers import chat, models, auth, convo, presets, templates, images, workflows
 from app.middleware.ratelimit import RateLimitMiddleware
 from app.core.redis import get_redis, close_redis
 from app.core.config import settings
+from app.core.exceptions import AppError
 from prometheus_fastapi_instrumentator import Instrumentator
 
 
@@ -25,6 +27,15 @@ app.add_middleware(
 )
 
 app.add_middleware(RateLimitMiddleware)
+
+
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError):
+    # Translate service-layer domain errors into HTTP at the API boundary.
+    # Matches FastAPI's default error shape ({"detail": ...}); one handler
+    # covers every AppError subclass (Starlette walks the exception's MRO).
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
 
 @app.on_event("startup")
 async def startup():
@@ -48,4 +59,5 @@ app.include_router(convo.router, prefix="/v1")
 app.include_router(presets.router, prefix="/v1")
 app.include_router(templates.router, prefix="/v1")
 app.include_router(images.router, prefix="/v1")
+app.include_router(workflows.router, prefix="/v1")
  
