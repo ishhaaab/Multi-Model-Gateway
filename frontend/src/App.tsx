@@ -11,6 +11,7 @@ import ChatPage from "@/pages/chat";
 import ImagesPage from "@/pages/images";
 import PresetsPage from "@/pages/presets";
 import TemplatesPage from "@/pages/templates";
+import WorkflowsPage from "@/pages/workflows";
 import SettingsPage from "@/pages/settings";
 import NotFoundPage from "@/pages/not-found";
 
@@ -40,6 +41,7 @@ export default function App() {
           <Route path="/images" element={<ImagesPage />} />
           <Route path="/presets" element={<PresetsPage />} />
           <Route path="/templates" element={<TemplatesPage />} />
+          <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
 

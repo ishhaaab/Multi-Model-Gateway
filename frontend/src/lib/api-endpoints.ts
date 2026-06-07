@@ -11,6 +11,9 @@ import type {
   PromptTemplate,
   TemplateCreate,
   TemplateUpdate,
+  Workflow,
+  WorkflowCreate,
+  WorkflowUpdate,
   RewriteResponse,
   ImageGenerateRequest,
   ImageGenerateResponse,
@@ -94,6 +97,22 @@ export const templateApi = {
       prompt,
       template_id: templateId ?? null,
     }),
+};
+
+// ───────────── Workflows ({ data: [...] }) ─────────────
+export const workflowApi = {
+  list: () => apiClient.request<ListEnvelope<Workflow>>("GET", "/v1/workflows"),
+
+  get: (id: string) => apiClient.request<Workflow>("GET", `/v1/workflows/${id}`),
+
+  create: (data: WorkflowCreate) =>
+    apiClient.request<Workflow>("POST", "/v1/workflows", data),
+
+  update: (id: string, data: WorkflowUpdate) =>
+    apiClient.request<Workflow>("PATCH", `/v1/workflows/${id}`, data),
+
+  delete: (id: string) =>
+    apiClient.request<{ detail: string }>("DELETE", `/v1/workflows/${id}`),
 };
 
 // ───────────── Images ─────────────

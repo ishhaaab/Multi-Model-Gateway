@@ -117,6 +117,25 @@ export interface TemplateCreate {
 
 export type TemplateUpdate = Partial<TemplateCreate>;
 
+export interface Workflow {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  graph: Record<string, unknown>;
+  param_map: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface WorkflowCreate {
+  name: string;
+  description?: string | null;
+  graph: Record<string, unknown>;
+  param_map?: Record<string, unknown> | null;
+}
+
+export type WorkflowUpdate = Partial<WorkflowCreate>;
+
 export interface RewriteRequest {
   prompt: string;
   template_id?: string | null;
@@ -131,6 +150,7 @@ export interface ImageGenerateRequest {
   prompt: string;
   negative_prompt?: string;
   template_id?: string | null;
+  workflow_id?: string | null;
   steps?: number;
   cfg?: number;
   aspect_ratio?: string;

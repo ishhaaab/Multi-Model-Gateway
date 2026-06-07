@@ -1,11 +1,10 @@
 import { useRef, type MouseEvent as ReactMouseEvent } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
   Brain,
   MessageSquarePlus,
+  ImagePlus,
   ImageIcon,
-  SlidersHorizontal,
-  LayoutTemplate,
   Settings,
   LogOut,
   MessagesSquare,
@@ -15,23 +14,30 @@ import {
 import { useLayoutStore, SIDEBAR_MIN, SIDEBAR_MAX } from "@/stores/layout-store";
 import { useAuthStore } from "@/stores/auth-store";
 import { useChatStore } from "@/stores/chat-store";
+import { useImageStore } from "@/stores/image-store";
 import { toast } from "@/stores/ui-store";
 import { cn } from "@/lib/utils";
 import { ConversationList } from "@/components/chat/ConversationList";
+import { ImageHistoryList } from "@/components/images/ImageHistoryList";
 
-const NAV = [
+// Top-level mode switch — the Chat ↔ Image distinction.
+const MODES = [
   { to: "/chat", label: "Chat", icon: MessagesSquare },
-  { to: "/images", label: "Images", icon: ImageIcon },
-  { to: "/presets", label: "Presets", icon: SlidersHorizontal },
-  { to: "/templates", label: "Templates", icon: LayoutTemplate },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/images", label: "Image", icon: ImageIcon },
 ];
 
 export function Sidebar() {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const userEmail = useAuthStore((s) => s.userEmail);
   const logout = useAuthStore((s) => s.logout);
   const startNewChat = useChatStore((s) => s.startNewChat);
+  const startNewImage = useImageStore((s) => s.startNewImage);
+
+  // The primary action mirrors the active mode: New Chat vs. New Image.
+  const isImages = pathname.startsWith("/images");
+  const newLabel = isImages ? "New Image" : "New Chat";
+  const NewIcon = isImages ? ImagePlus : MessageSquarePlus;
 
   const sidebarWidth = useLayoutStore((s) => s.sidebarWidth);
   const setSidebarWidth = useLayoutStore((s) => s.setSidebarWidth);
@@ -60,9 +66,14 @@ export function Sidebar() {
     document.addEventListener("mouseup", onUp);
   };
 
-  const handleNewChat = () => {
-    startNewChat();
-    navigate("/chat");
+  const handleNew = () => {
+    if (isImages) {
+      startNewImage();
+      navigate("/images");
+    } else {
+      startNewChat();
+      navigate("/chat");
+    }
   };
 
   const handleLogout = async () => {
@@ -72,7 +83,7 @@ export function Sidebar() {
   };
 
   // Collapsed → a slim icon rail that mirrors the expanded layout's vertical
-  // positions (new chat at top, nav at the bottom, user in the footer).
+  // positions (new chat + mode toggle at top, settings/account in the footer).
   if (collapsed) {
     return (
       <aside className="flex h-full w-14 shrink-0 flex-col border-r border-border bg-bg-secondary/80">
@@ -87,21 +98,18 @@ export function Sidebar() {
             <PanelLeftOpen size={20} />
           </button>
           <button
-            onClick={handleNewChat}
-            title="New Chat"
-            aria-label="New Chat"
+            onClick={handleNew}
+            title={newLabel}
+            aria-label={newLabel}
             className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent-primary text-white transition-[filter] hover:brightness-110"
           >
-            <MessageSquarePlus size={18} />
+            <NewIcon size={18} />
           </button>
         </div>
 
-        {/* spacer where the conversation list sits when expanded */}
-        <div className="min-h-0 flex-1" />
-
-        {/* nav icons — at the bottom, same as the expanded layout */}
-        <nav className="flex flex-col items-center gap-1 border-t border-border px-2 py-2">
-          {NAV.map(({ to, label, icon: Icon }) => (
+        {/* mode toggle — Chat / Image */}
+        <nav className="flex flex-col items-center gap-1 px-2 pb-2">
+          {MODES.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -120,8 +128,25 @@ export function Sidebar() {
           ))}
         </nav>
 
-        {/* user — footer */}
-        <div className="flex justify-center border-t border-border px-2 py-3">
+        {/* spacer where the conversation list sits when expanded */}
+        <div className="min-h-0 flex-1" />
+
+        {/* footer — settings + account */}
+        <div className="flex flex-col items-center gap-1 border-t border-border px-2 py-3">
+          <NavLink
+            to="/settings"
+            title="Settings"
+            className={({ isActive }) =>
+              cn(
+                "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+                isActive
+                  ? "bg-bg-tertiary text-accent-primary"
+                  : "text-text-secondary hover:bg-bg-tertiary/60 hover:text-text-primary"
+              )
+            }
+          >
+            <Settings size={18} />
+          </NavLink>
           <button
             onClick={toggleSidebar}
             title={userEmail ?? "Account"}
@@ -159,55 +184,54 @@ export function Sidebar() {
         </button>
       </div>
 
+      {/* Mode toggle — Chat / Image */}
+      <div className="px-3 pb-3">
+        <div className="flex gap-1 rounded-xl border border-border bg-bg-primary/40 p-1">
+          {MODES.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) =>
+                cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+                  isActive
+                    ? "bg-bg-elevated text-text-primary shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
+                    : "text-text-secondary hover:text-text-primary"
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <Icon size={15} className={isActive ? "text-accent-primary" : undefined} />
+                  {label}
+                </>
+              )}
+            </NavLink>
+          ))}
+        </div>
+      </div>
+
       {/* New chat */}
       <div className="px-3 pb-3">
         <button
-          onClick={handleNewChat}
+          onClick={handleNew}
           className={cn(
             "flex w-full items-center justify-center gap-2 rounded-lg bg-accent-primary px-4 py-2.5",
             "text-sm font-medium text-white transition-[transform,filter] duration-150",
             "hover:brightness-110 active:scale-[0.98] shadow-[0_2px_12px_-2px_rgba(255,101,63,0.5)]"
           )}
         >
-          <MessageSquarePlus size={17} />
-          New Chat
+          <NewIcon size={17} />
+          {newLabel}
         </button>
       </div>
 
-      {/* Conversations */}
+      {/* History — chat conversations, or image generations in Image mode */}
       <div className="min-h-0 flex-1 overflow-y-auto px-2">
-        <ConversationList />
+        {isImages ? <ImageHistoryList /> : <ConversationList />}
       </div>
 
-      {/* Nav links */}
-      <nav className="border-t border-border px-2 py-2">
-        {NAV.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) =>
-              cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                isActive
-                  ? "bg-bg-tertiary text-text-primary"
-                  : "text-text-secondary hover:bg-bg-tertiary/60 hover:text-text-primary"
-              )
-            }
-          >
-            {({ isActive }) => (
-              <>
-                <Icon
-                  size={17}
-                  className={isActive ? "text-accent-primary" : undefined}
-                />
-                {label}
-              </>
-            )}
-          </NavLink>
-        ))}
-      </nav>
-
-      {/* Footer / user */}
+      {/* Footer / user + settings + logout */}
       <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-bg-elevated text-[0.7rem] font-semibold uppercase text-text-primary">
@@ -217,14 +241,31 @@ export function Sidebar() {
             {userEmail ?? "Unknown"}
           </span>
         </div>
-        <button
-          onClick={handleLogout}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-muted hover:bg-bg-tertiary hover:text-danger transition-colors"
-          aria-label="Log out"
-          title="Log out"
-        >
-          <LogOut size={16} />
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          <NavLink
+            to="/settings"
+            title="Settings"
+            aria-label="Settings"
+            className={({ isActive }) =>
+              cn(
+                "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
+                isActive
+                  ? "bg-bg-tertiary text-accent-primary"
+                  : "text-text-muted hover:bg-bg-tertiary hover:text-text-primary"
+              )
+            }
+          >
+            <Settings size={16} />
+          </NavLink>
+          <button
+            onClick={handleLogout}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-text-muted hover:bg-bg-tertiary hover:text-danger transition-colors"
+            aria-label="Log out"
+            title="Log out"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Drag-to-resize handle on the border shared with the main area */}

@@ -125,34 +125,44 @@ export default function SettingsPage() {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
         <div className="mx-auto flex max-w-3xl flex-col gap-5">
-          {/* Connection status */}
-          <div className="flex items-center justify-between rounded-xl border border-border bg-bg-secondary/60 px-5 py-4">
-            <div className="flex items-center gap-3">
-              {connected ? (
-                <Wifi size={20} className="text-success" />
-              ) : (
-                <WifiOff size={20} className="text-danger" />
-              )}
-              <div className="flex flex-col">
+          {/* Connection — live status + test button merged with config details */}
+          <div className="rounded-xl border border-border bg-bg-secondary/60 px-5 py-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                {connected ? (
+                  <Wifi size={20} className="text-success" />
+                ) : (
+                  <WifiOff size={20} className="text-danger" />
+                )}
                 <span className="flex items-center gap-2 text-sm font-medium text-text-primary">
                   <StatusDot ok={connected} />
                   {health === "checking" ? "Checking…" : connected ? "Connected" : "Disconnected"}
                 </span>
-                <span className="text-[0.8125rem] text-text-muted">
-                  {API_URL}
-                  {API_PREFIX}
-                </span>
               </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                leftIcon={<RefreshCw size={14} />}
+                onClick={checkHealth}
+                isLoading={health === "checking"}
+              >
+                Test Connection
+              </Button>
             </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              leftIcon={<RefreshCw size={14} />}
-              onClick={checkHealth}
-              isLoading={health === "checking"}
-            >
-              Test Connection
-            </Button>
+
+            <div className="my-4 border-t border-border" />
+
+            <dl className="grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-[160px_1fr]">
+              <dt className="text-text-muted">Backend URL</dt>
+              <dd className="font-mono text-text-primary">{API_URL}</dd>
+              <dt className="text-text-muted">API Prefix</dt>
+              <dd className="font-mono text-text-primary">{API_PREFIX || "(empty)"}</dd>
+              <dt className="text-text-muted">ComfyUI URL</dt>
+              <dd className="font-mono text-text-primary">{COMFYUI_HOST}</dd>
+            </dl>
+            <p className="mt-3 text-[0.75rem] text-text-muted">
+              Configuration is managed via environment variables, not through this UI.
+            </p>
           </div>
 
           {/* Local models */}
@@ -298,25 +308,6 @@ export default function SettingsPage() {
             )}
           </Section>
 
-          {/* Connection info */}
-          <Section title="Connection Info" icon={<Wifi size={18} />}>
-            <dl className="grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-[160px_1fr]">
-              <dt className="text-text-muted">Backend URL</dt>
-              <dd className="font-mono text-text-primary">{API_URL}</dd>
-              <dt className="text-text-muted">API Prefix</dt>
-              <dd className="font-mono text-text-primary">{API_PREFIX || "(empty)"}</dd>
-              <dt className="text-text-muted">ComfyUI URL</dt>
-              <dd className="font-mono text-text-primary">{COMFYUI_HOST}</dd>
-              <dt className="text-text-muted">Status</dt>
-              <dd className="flex items-center gap-2 text-text-primary">
-                <StatusDot ok={connected} />
-                {connected ? "Connected" : "Disconnected"}
-              </dd>
-            </dl>
-            <p className="mt-3 text-[0.75rem] text-text-muted">
-              Configuration is managed via environment variables, not through this UI.
-            </p>
-          </Section>
         </div>
       </div>
     </div>

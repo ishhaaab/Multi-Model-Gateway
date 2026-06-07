@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ImageIcon,
@@ -13,6 +13,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { useTemplateStore } from "@/stores/template-store";
+import { useImageStore } from "@/stores/image-store";
+import { useWorkflowStore } from "@/stores/workflow-store";
 import { toast } from "@/stores/ui-store";
 import { useImageGeneration } from "@/hooks/use-image";
 import type { CompletedGeneration } from "@/hooks/use-image";
@@ -25,8 +27,6 @@ import {
   formatRelativeTime,
   truncate,
 } from "@/lib/utils";
-import { addHistory, clearHistory, loadHistory } from "@/lib/image-history";
-import type { HistoryEntry } from "@/lib/image-history";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
 import { Slider } from "@/components/ui/Slider";
@@ -99,9 +99,19 @@ export default function ImagesPage() {
   const templates = useTemplateStore((s) => s.templates);
   const fetchTemplates = useTemplateStore((s) => s.fetchTemplates);
   const hasLoadedTemplates = useTemplateStore((s) => s.hasLoaded);
+  const workflows = useWorkflowStore((s) => s.workflows);
 
-  const { generate, cancel, isGenerating, status, images, rewrittenPrompt, error } =
+  const { generate, cancel, reset, isGenerating, status, images, rewrittenPrompt, error } =
     useImageGeneration();
+
+  // "New Image" (left sidebar) bumps this nonce → clear the prompt + results.
+  const newImageNonce = useImageStore((s) => s.newImageNonce);
+  const initialNonce = useRef(newImageNonce);
+
+  // Generation history lives in the store so the left sidebar can show it too.
+  const history = useImageStore((s) => s.history);
+  const addImageHistory = useImageStore((s) => s.addImageHistory);
+  const clearImageHistory = useImageStore((s) => s.clearImageHistory);
 
   // aspect ratios — sourced from the backend (single source of truth)
   const [aspectRatios, setAspectRatios] = useState<string[]>([]);
@@ -115,6 +125,7 @@ export default function ImagesPage() {
   const [steps, setSteps] = useState(10);
   const [cfg, setCfg] = useState(1.2);
   const [templateId, setTemplateId] = useState<string>("");
+  const [workflowId, setWorkflowId] = useState<string>("");
   const [batchSize, setBatchSize] = useState(1);
   const [randomSeed, setRandomSeed] = useState(true);
   const [seed, setSeed] = useState("");
@@ -122,11 +133,18 @@ export default function ImagesPage() {
   const [showAdvanced, setShowAdvanced] = useState(true);
 
   const [fullscreen, setFullscreen] = useState<string | null>(null);
-  const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory());
 
   useEffect(() => {
     if (!hasLoadedTemplates) void fetchTemplates();
   }, [hasLoadedTemplates, fetchTemplates]);
+
+  // Reset to a blank composer when "New Image" is clicked (skip the initial
+  // mount value, where the form is already fresh).
+  useEffect(() => {
+    if (newImageNonce === initialNonce.current) return;
+    setPrompt("");
+    reset();
+  }, [newImageNonce, reset]);
 
   const loadAspectRatios = useCallback(async () => {
     setAspectLoading(true);
@@ -148,14 +166,12 @@ export default function ImagesPage() {
   }, [loadAspectRatios]);
 
   const onComplete = (result: CompletedGeneration) => {
-    setHistory(
-      addHistory({
-        promptId: result.promptId,
-        prompt: result.rewrittenPrompt,
-        images: result.images,
-        createdAt: Date.now(),
-      })
-    );
+    addImageHistory({
+      promptId: result.promptId,
+      prompt: result.rewrittenPrompt,
+      images: result.images,
+      createdAt: Date.now(),
+    });
   };
 
   const handleGenerate = () => {
@@ -168,6 +184,7 @@ export default function ImagesPage() {
         prompt: prompt.trim(),
         negative_prompt: negative.trim() || NEG_DEFAULT,
         template_id: templateId || null,
+        workflow_id: workflowId || null,
         steps,
         cfg,
         // Omit when unknown so the backend applies its own default.
@@ -185,6 +202,11 @@ export default function ImagesPage() {
     ...templates.map((t) => ({ value: t.id, label: t.name })),
   ];
 
+  const workflowOptions = [
+    { value: "", label: "Default workflow" },
+    ...workflows.map((w) => ({ value: w.id, label: w.name })),
+  ];
+
   const gridCols = images.length <= 1 ? "grid-cols-1" : "grid-cols-2";
 
   return (
@@ -198,6 +220,16 @@ export default function ImagesPage() {
         {/* ── Left: prompt + options ── */}
         <div className="min-h-0 overflow-y-auto border-r border-border p-6">
           <div className="flex flex-col gap-4">
+            {/* Rewrite — sits above the prompt so it reads as a mode for it */}
+            <div className="rounded-lg border border-border bg-bg-secondary/60 px-3 py-3">
+              <Toggle
+                checked={rewrite}
+                onChange={setRewrite}
+                label="Rewrite prompt with AI"
+                description="Enhances your prompt using an AI model for better results"
+              />
+            </div>
+
             <Textarea
               label="Prompt"
               value={prompt}
@@ -289,6 +321,16 @@ export default function ImagesPage() {
                   />
                 </div>
 
+                <div className="flex flex-col gap-1">
+                  <label className="text-sm font-medium text-text-secondary">Workflow</label>
+                  <Dropdown
+                    value={workflowId}
+                    options={workflowOptions}
+                    onChange={setWorkflowId}
+                    className="w-full"
+                  />
+                </div>
+
                 {/* Batch size */}
                 <div className="flex flex-col gap-1.5">
                   <label className="text-sm font-medium text-text-secondary">Number of images</label>
@@ -328,13 +370,6 @@ export default function ImagesPage() {
                   )}
                 </div>
 
-                {/* Rewrite */}
-                <Toggle
-                  checked={rewrite}
-                  onChange={setRewrite}
-                  label="Rewrite prompt with AI"
-                  description="Enhances your prompt using an AI model for better results"
-                />
               </div>
             )}
 
@@ -406,7 +441,7 @@ export default function ImagesPage() {
                   variant="ghost"
                   size="sm"
                   leftIcon={<Trash2 size={14} />}
-                  onClick={() => setHistory(clearHistory())}
+                  onClick={clearImageHistory}
                 >
                   Clear
                 </Button>
