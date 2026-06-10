@@ -118,16 +118,24 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
         return
 
     usage = None
-    async for chunk in response:
-        if getattr(chunk, "usage", None):
-            usage = chunk.usage          # final usage-only chunk (include_usage)
-        if not chunk.choices:
-            continue
-        content = chunk.choices[0].delta.content
-        if content:
-            full_response += content
-            token_count += 1
-            yield f"data: {content}\n\n"
+    stream_error = False
+    try:
+        async for chunk in response:
+            if getattr(chunk, "usage", None):
+                usage = chunk.usage          # final usage-only chunk (include_usage)
+            if not chunk.choices:
+                continue
+            content = chunk.choices[0].delta.content
+            if content:
+                full_response += content
+                token_count += 1
+                yield f"data: {content}\n\n"
+    except Exception as e:
+        # provider died mid-generation: keep whatever streamed so far so the
+        # exchange isn't lost, and end the stream cleanly instead of crashing
+        # without [DONE]
+        logger.error("Stream interrupted mid-generation: %s", repr(e))
+        stream_error = True
 
     elapsed = time.time() - start_time
 
@@ -139,9 +147,13 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
         prompt_tok = 0
         completion_tok = token_count
 
-    await save_messages(conversation_id, request.messages[-1].content, full_response, model, completion_tok, db)
-    record_metrics(request.provider.value, model, elapsed, prompt_tok, completion_tok, messages, full_response, conversation_id)
+    # on a mid-stream failure with nothing generated there is no exchange to save
+    if full_response or not stream_error:
+        await save_messages(conversation_id, request.messages[-1].content, full_response, model, completion_tok, db)
+        record_metrics(request.provider.value, model, elapsed, prompt_tok, completion_tok, messages, full_response, conversation_id)
 
+    if stream_error:
+        yield "data: [ERROR] stream interrupted\n\n"
     yield "data: [DONE]\n\n"
 
 

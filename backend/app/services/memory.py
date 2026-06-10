@@ -5,13 +5,14 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text as sa_text
 import uuid
+from app.core.config import settings
 from app.models.memories import Memory
 
 logger = logging.getLogger(__name__)
 
 
-EMBED_URL = "http://host.docker.internal:11434/api/embeddings"
-EMBED_MODEL = "nomic-embed-text:latest"
+EMBED_URL = f"{settings.OLLAMA_URL}/api/embeddings"
+EMBED_MODEL = settings.EMBED_MODEL
 
 async def get_embedding(content: str) -> list[float] | None:
     """Return an embedding vector, or None if the embedding service is
@@ -49,9 +50,15 @@ async def retrieve_memories(conversation_id: str, query: str, db: AsyncSession):
     query_vector = await get_embedding(query)
     if query_vector is None:
         return []  # if embedding is unavailable then no memory context for this turn
-    result = await db.execute(
-        sa_text("SELECT content, role, created_at FROM memories WHERE conversation_id = :cid ORDER BY embedding <=> :emb LIMIT 3"),
-        {"cid": conversation_id, "emb": str(query_vector)},
-    )
-    rows = result.fetchall()
+    # memory is auxiliary: a failed retrieval must not take down the chat turn
+    try:
+        result = await db.execute(
+            sa_text("SELECT content, role, created_at FROM memories WHERE conversation_id = :cid ORDER BY embedding <=> CAST(:emb AS vector) LIMIT 3"),
+            {"cid": conversation_id, "emb": str(query_vector)},
+        )
+        rows = result.fetchall()
+    except Exception as e:
+        logger.warning("memory retrieval failed (%r); skipping memory context", e)
+        await db.rollback()  # clear the failed-transaction state so the session stays usable
+        return []
     return [{"role": r.role, "content": r.content, "created_at": r.created_at} for r in rows]

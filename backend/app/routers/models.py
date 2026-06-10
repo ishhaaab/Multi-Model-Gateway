@@ -11,7 +11,10 @@ router = APIRouter()
 @router.get("/models")
 async def list_local_models(user_id: str = Depends(get_current_user)):
     client = get_local_client()
-    result = await client.models.list()
+    try:
+        result = await client.models.list()
+    except Exception:
+        raise HTTPException(status_code=502, detail="LM Studio unavailable")
     return {"data": [{"id": m.id, "object": "model"} for m in (result.data or [])]}
 
 

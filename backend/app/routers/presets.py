@@ -10,6 +10,7 @@ from app.db import get_db
 from app.core.security import get_current_user
 from app.models.presets import (
     Preset,
+    DEFAULT_SYSTEM_PROMPT,
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_P,
     DEFAULT_TOP_K,
@@ -22,7 +23,7 @@ router = APIRouter()
 
 class PresetCreate(BaseModel):
     name: str
-    system_prompt: Optional[str] = None
+    system_prompt: Optional[str] = DEFAULT_SYSTEM_PROMPT
     temperature: Optional[float] = DEFAULT_TEMPERATURE
     token_limit: Optional[int] = None
     context_overflow: Optional[str] = DEFAULT_CONTEXT_OVERFLOW

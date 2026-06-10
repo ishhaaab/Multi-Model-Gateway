@@ -1,12 +1,15 @@
+import re
+
 from jose import jwt
 from datetime import datetime, timedelta
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.db import get_db
 from app.core import security
@@ -20,9 +23,35 @@ from app.models.templates import PromptTemplate
 from app.services.template import DEFAULT_STRUCTURE
 import uuid
 
+_EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+
 class UserCreate(BaseModel):
     email: str
     password: str
+
+    # validated on registration only — login must keep accepting whatever
+    # credentials existing accounts were created with
+    @field_validator("email")
+    @classmethod
+    def _email_format(cls, v: str) -> str:
+        v = v.strip()
+        if not _EMAIL_RE.fullmatch(v):
+            raise ValueError("invalid email address")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def _password_length(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("password must be at least 8 characters")
+        return v
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
 
 router = APIRouter()
 
@@ -34,37 +63,41 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
     if user is not None:
         raise HTTPException(status_code=400, detail="user already exists")
 
-    new_user = User(email=user_data.email, hashed_password=security.hash_password(user_data.password))
-    db.add(new_user)
-    await db.commit()    
-    
-    # a default model parameter preset for LLMs
-    default_preset = Preset(
-        id=uuid.uuid4(),
-        user_id=new_user.id,
-        name="Default",
-        temperature=DEFAULT_TEMPERATURE,
-        context_overflow=DEFAULT_CONTEXT_OVERFLOW,
-        )
-    db.add(default_preset)
-    
-    # a default prompt template for t2i ComfyUI tasks
-    default_template = PromptTemplate(
-        id=uuid.uuid4(),
-        user_id=new_user.id,
-        name="Default SDXL Template",
-        description="Default structure for SDXL prompt rewriting",
-        structure=DEFAULT_STRUCTURE,
-        )
-    db.add(default_template)
-    
-    await db.commit()
+    # single transaction: user + default preset + default template all land
+    # or none do, so a failure can't leave a half-initialised account. The
+    # IntegrityError catch covers the register-register race the select
+    # above can't (email is unique in the DB).
+    try:
+        new_user = User(email=user_data.email, hashed_password=security.hash_password(user_data.password))
+        db.add(new_user)
+        await db.flush()  # assign new_user.id; surfaces duplicate email
+
+        # a default model parameter preset for LLMs
+        db.add(Preset(
+            id=uuid.uuid4(),
+            user_id=new_user.id,
+            name="Default",
+            temperature=DEFAULT_TEMPERATURE,
+            context_overflow=DEFAULT_CONTEXT_OVERFLOW,
+        ))
+        # a default prompt template for t2i ComfyUI tasks
+        db.add(PromptTemplate(
+            id=uuid.uuid4(),
+            user_id=new_user.id,
+            name="Default SDXL Template",
+            description="Default structure for SDXL prompt rewriting",
+            structure=DEFAULT_STRUCTURE,
+        ))
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="user already exists")
 
     return {"message": "user created successfully"}
     
 
 @router.post("/login")
-async def login_user(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
+async def login_user(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
     query = await db.execute(select(User).where(User.email == user_data.email))
     user = query.scalar_one_or_none()
 

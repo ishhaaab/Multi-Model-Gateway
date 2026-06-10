@@ -1,3 +1,4 @@
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field, field_validator
@@ -68,11 +69,14 @@ async def job_status(prompt_id: str, user_id: str = Depends(get_current_user)):
     if owner != str(user_id):
         # unknown, expired, or someone else's job
         raise HTTPException(status_code=404, detail="job not found")
-    return await get_job_status(prompt_id)
+    try:
+        return await get_job_status(prompt_id)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="ComfyUI unavailable")
 
 
 @router.get("/images/aspect-ratios")
 async def list_aspect_ratios():
-    # Static config (no auth) — the single source of truth for the
+    # Static config & the single source of truth for the
     # ResolutionSelector node, shared by every workflow that uses it.
     return {"aspect_ratios": ASPECT_RATIOS, "default": DEFAULT_ASPECT_RATIO}

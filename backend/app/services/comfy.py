@@ -223,8 +223,21 @@ async def get_job_status(prompt_id: str) -> dict:
         
         if prompt_id not in history:
             return {"status": "pending"}
-        
+
         job = history[prompt_id]
+
+        # surface execution failures (OOM, missing checkpoint, bad node)
+        # instead of leaving the client polling a job that will never finish
+        status_info = job.get("status", {}) or {}
+        if status_info.get("status_str") == "error":
+            error_msg = None
+            for entry in status_info.get("messages", []):
+                # messages are [type, payload] pairs
+                if isinstance(entry, (list, tuple)) and len(entry) == 2 and entry[0] == "execution_error":
+                    error_msg = entry[1].get("exception_message")
+                    break
+            return {"status": "failed", "error": error_msg or "ComfyUI execution error"}
+
         outputs = job.get("outputs", {})
         
         # find images in outputs

@@ -35,6 +35,7 @@ async def convo_get(db: AsyncSession = Depends(get_db), user_id= Depends(securit
         select(Conversation)
         .where(Conversation.user_id== user_id)
         .where(exists().where(Message.conversation_id == Conversation.id))
+        .order_by(Conversation.created_at.desc())
     )
     conversations = query.scalars().all()
     return conversations
@@ -51,7 +52,13 @@ async def messages_get(convo_id: str, db: AsyncSession = Depends(get_db), user_i
     if str(conversation.user_id) != str(user_id):
         raise HTTPException(status_code=403, detail="unauthorised user")
     
-    messages_result = await db.execute(select(Message).where(Message.conversation_id == convo_id))
+    # explicit ordering — Postgres gives no guarantee without it, and the
+    # chat history must render in exchange order
+    messages_result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == convo_id)
+        .order_by(Message.index.asc(), Message.created_at.asc())
+    )
     messages = messages_result.scalars().all()
     return messages
 
@@ -87,3 +94,79 @@ async def convo_delete(convo_id: str, db: AsyncSession= Depends(get_db), user_id
     await db.delete(conversation)
     await db.commit()
     return {"message": "conversation deleted"}
+
+
+# ───────────── Message-level operations ─────────────
+
+class MessageEdit(BaseModel):
+    content: str
+
+class BranchRequest(BaseModel):
+    message_id: str
+
+
+async def _get_owned_conversation(convo_id: str, user_id, db: AsyncSession) -> Conversation:
+    query = await db.execute(select(Conversation).where(Conversation.id == convo_id))
+    conversation = query.scalar_one_or_none()
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="convo not found")
+    if str(conversation.user_id) != str(user_id):
+        raise HTTPException(status_code=403, detail="unauthorised user")
+    return conversation
+
+
+async def _get_message(convo_id: str, message_id: str, db: AsyncSession) -> Message:
+    query = await db.execute(
+        select(Message).where(Message.id == message_id, Message.conversation_id == convo_id)
+    )
+    message = query.scalar_one_or_none()
+    if message is None:
+        raise HTTPException(status_code=404, detail="message not found")
+    return message
+
+
+# edit a single message's content in place
+@router.patch("/convo/{convo_id}/messages/{message_id}")
+async def message_edit(convo_id: str, message_id: str, body: MessageEdit, db: AsyncSession = Depends(get_db), user_id= Depends(security.get_current_user)):
+    await _get_owned_conversation(convo_id, user_id, db)
+    message = await _get_message(convo_id, message_id, db)
+    message.content = body.content
+    await db.commit()
+    return {"message": "message updated"}
+
+
+# delete a single message
+@router.delete("/convo/{convo_id}/messages/{message_id}")
+async def message_delete(convo_id: str, message_id: str, db: AsyncSession = Depends(get_db), user_id= Depends(security.get_current_user)):
+    await _get_owned_conversation(convo_id, user_id, db)
+    message = await _get_message(convo_id, message_id, db)
+    await db.delete(message)
+    await db.commit()
+    return {"message": "message deleted"}
+
+
+# branch: copy every message up to & including the target into a fresh conversation
+@router.post("/convo/{convo_id}/branch")
+async def convo_branch(convo_id: str, body: BranchRequest, db: AsyncSession = Depends(get_db), user_id= Depends(security.get_current_user)):
+    source = await _get_owned_conversation(convo_id, user_id, db)
+    target = await _get_message(convo_id, body.message_id, db)
+    cutoff = target.index if target.index is not None else 0
+
+    result = await db.execute(select(Message).where(Message.conversation_id == convo_id))
+    to_copy = [m for m in result.scalars().all() if (m.index if m.index is not None else 0) <= cutoff]
+
+    branch = Conversation(title=f"{source.title} (branch)", user_id=user_id)
+    db.add(branch)
+    await db.flush()  # assign branch.id before copying messages into it
+
+    for m in to_copy:
+        db.add(Message(
+            conversation_id=branch.id,
+            role=m.role,
+            content=m.content,
+            index=m.index,
+            model_used=m.model_used,
+            tokens_used=m.tokens_used,
+        ))
+    await db.commit()
+    return {"id": str(branch.id)}

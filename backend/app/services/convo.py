@@ -127,14 +127,20 @@ async def load_history(conversation_id: str, query: str, db: AsyncSession) -> li
 
 
 async def save_messages(conversation_id: str, user_content: str, assistant_content: str, model: str, token_count, db: AsyncSession):
-    
+    # Lock the conversation row for the duration of the transaction so two
+    # concurrent sends can't both read the same max(index) and allocate
+    # colliding indices (which would corrupt the exchange invariant).
+    convo_result = await db.execute(
+        select(Conversation).where(Conversation.id == conversation_id).with_for_update()
+    )
+    convo = convo_result.scalar_one_or_none()
+
     result = await db.execute(
-    select(func.max(Message.index)).where(Message.conversation_id == conversation_id)
-)
+        select(func.max(Message.index)).where(Message.conversation_id == conversation_id)
+    )
     max_index = result.scalar() or 0
     user_index = int(max_index) + 1
     assistant_index = user_index + 1
-
 
     user_msg = Message(
         conversation_id=conversation_id,
@@ -152,13 +158,10 @@ async def save_messages(conversation_id: str, user_content: str, assistant_conte
     )
     db.add(user_msg)
     db.add(assistant_msg)
-    await db.commit()
-
-    convo_result = await db.execute(select(Conversation).where(Conversation.id == conversation_id))
-    convo = convo_result.scalar_one_or_none()
     if convo:
         convo.token_count = (convo.token_count or 0) + token_count
-        await db.commit()
+    # one commit: both messages + token count land together (and release the lock)
+    await db.commit()
 
     await store_memory(conversation_id, role="user", content=user_content, db= db)
     await store_memory(conversation_id, role="assistant", content=assistant_content, db= db)

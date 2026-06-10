@@ -4,8 +4,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from jose import jwt, JWTError
 from app.core.config import settings
 from app.core.redis import get_redis
+import logging
 import time
 import uuid
+
+logger = logging.getLogger(__name__)
 
 # skip rate limiting entirely.
 EXCLUDED_PATHS = {"/health", "/metrics", "/docs", "/openapi.json"}
@@ -37,19 +40,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 key = f"rate:ip:{client_ip}"
                 limit = settings.RATE_LIMIT_PER_MINUTE
 
-        redis = await get_redis()
         window = settings.RATE_LIMIT_WINDOW_SECONDS
         now = int(time.time())
         window_start = now - window
         # Unique member so multiple requests within the same second are each counted.
         member = f"{now}:{uuid.uuid4().hex}"
 
-        pipe = redis.pipeline()
-        pipe.zremrangebyscore(key, 0, window_start)   # drop requests outside the window
-        pipe.zadd(key, {member: now})                 # record this request
-        pipe.zcard(key)                               # count requests in the window
-        pipe.expire(key, window)                      # auto-expire idle keys
-        results = await pipe.execute()
+        # Fail open: a Redis outage degrades to "no rate limiting" instead of
+        # turning every request in the app into a 500.
+        try:
+            redis = await get_redis()
+            pipe = redis.pipeline()
+            pipe.zremrangebyscore(key, 0, window_start)   # drop requests outside the window
+            pipe.zadd(key, {member: now})                 # record this request
+            pipe.zcard(key)                               # count requests in the window
+            pipe.expire(key, window)                      # auto-expire idle keys
+            results = await pipe.execute()
+        except Exception as e:
+            logger.warning("rate limiter unavailable (%r); allowing request", e)
+            return await call_next(request)
 
         count = results[2]
 

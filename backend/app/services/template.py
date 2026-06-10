@@ -150,6 +150,6 @@ RULES:
             )
             response.raise_for_status()
             rewritten= response.json()["choices"][0]["message"]["content"].strip()
-            return f"{QUALITY_TAGS}, {rewritten}"
+            return f"{rewritten}"
     finally:
         await unload_rewrite_model(instance_id)

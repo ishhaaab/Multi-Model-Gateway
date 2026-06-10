@@ -18,3 +18,6 @@ prometheus-fastapi-instrumentator
 prometheus-client
 langfuse
 redis[asyncio]
+mcp
+arq
+nvidia-ml-py

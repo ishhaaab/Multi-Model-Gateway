@@ -1,9 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    LOCAL_URL:str
-    LOCAL_DEFAULT_MODEL: str
-
     LM_URL: str
     LM_DEFAULT_MODEL: str
     LM_CHAT_MODEL: str = ""   # default chat model on LM Studio; empty => falls back to LM_DEFAULT_MODEL
@@ -24,10 +21,34 @@ class Settings(BaseSettings):
     # (older turns remain reachable via semantic memory / RAG)
     MAX_HISTORY_MESSAGES: int = 30
 
-    # comma-separated list of allowed CORS origins ie the frontend URLs
+    # comma separated list of allowed CORS origins ie the frontend URLs
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
     OPENROUTER_DEFAULT_MODEL: str= ""
+
+    # ── Agent / MCP tools ──
+    AGENT_MAX_ITERATIONS: int = 6        # hard cap on model⇄tool round-trips per run
+    AGENT_TOKEN_BUDGET: int = 24000      # total prompt+completion tokens per agent run
+    TOOL_TIMEOUT_SECONDS: int = 30       # per tool execution
+    TOOL_RESULT_MAX_CHARS: int = 8000    # tool output fed back to the model is truncated to this
+    WEB_SEARCH_MAX_RESULTS: int = 5
+    SEARXNG_URL: str = ""                # optional self-hosted SearXNG; empty => DuckDuckGo HTML fallback
+    # JSON list of MCP servers to connect at startup, e.g.
+    # [{"name":"fs","transport":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/data"]},
+    #  {"name":"remote","transport":"sse","url":"http://mcp-host:8080/sse"}]
+    MCP_SERVERS: str = ""
+
+    # ── Deep research ──
+    RESEARCH_MAX_QUERIES: int = 4          # search queries the planner may issue
+    RESEARCH_RESULTS_PER_QUERY: int = 4    # results kept per search
+    RESEARCH_MAX_SOURCES: int = 6          # pages actually fetched and read
+    RESEARCH_PAGE_MAX_CHARS: int = 6000    # per-page text fed to the synthesizer
+    RESEARCH_JOB_TIMEOUT_SECONDS: int = 900
+
+    # ── Ollama (embeddings + cookbook catalog) ──
+    OLLAMA_URL: str = "http://host.docker.internal:11434"
+    EMBED_MODEL: str = "nomic-embed-text:latest"
+    COOKBOOK_CONTEXT_TOKENS: int = 8192    # context size assumed for KV-cache estimates
 
     DATABASE_URL: str
     REDIS_URL: str
@@ -62,7 +83,12 @@ def get_secret(name: str) -> str:
     if os.path.exists(path):
         with open(path) as f:
             return f.read().strip()
-    raise RuntimeError(f"Secret '{name}' not found at {path}")
+    # fall back to a plain env var so the app can run outside Docker
+    # (host-side alembic, tests, scripts) where compose secrets don't exist
+    env_value = os.environ.get(name.upper())
+    if env_value:
+        return env_value
+    raise RuntimeError(f"Secret '{name}' not found at {path} or in ${name.upper()}")
 
 OLLAMA_API_KEY = get_secret("ollama_api_key")
 OPENROUTER_API_KEY = get_secret("openrouter_api_key")
