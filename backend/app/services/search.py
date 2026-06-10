@@ -1,8 +1,8 @@
 """Web search + page fetching, shared by the web_search/fetch_page tools
 and the deep-research orchestrator.
 
-Search uses a self-hosted SearXNG instance when SEARXNG_URL is set,
-otherwise DuckDuckGo's HTML endpoint (no API key needed).
+Search uses a self hosted SearXNG instance when SEARXNG_URL is set,
+otherwise DuckDuckGo's HTML endpoint cus no API key needed :).
 """
 import html as html_lib
 import re

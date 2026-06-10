@@ -25,8 +25,8 @@ class Tool:
     description: str
     parameters: dict  # JSON Schema for the arguments the model must produce
     handler: Callable[[dict, ToolContext], Awaitable[str]]
-    # First-party tools are allowed by default; everything else (MCP) is
-    # deny-by-default until the user grants it (see agent.get_allowed_tools).
+    # First party tools are allowed by default; everything else (MCP) is
+    # deny by default until the user grants it (see agent.get_allowed_tools).
     first_party: bool = True
 
 

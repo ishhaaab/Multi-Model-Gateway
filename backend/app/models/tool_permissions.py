@@ -5,10 +5,10 @@ import uuid, datetime
 
 
 class ToolPermission(Base):
-    """Per-tenant tool grant/deny override.
+    """Per tenant tool grant/deny override.
 
-    No row for a (user, tool) pair means the default policy applies:
-    first-party tools allowed, MCP tools denied.
+    No row for a (user, tool) pair means:
+    first party tools are allowed but MCP tools denied.
     """
     __tablename__ = "tool_permissions"
     id = Column(UUID, primary_key=True, default=uuid.uuid4)

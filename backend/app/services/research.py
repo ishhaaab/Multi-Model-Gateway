@@ -1,10 +1,10 @@
-"""Deep-research orchestration: plan → search → read → synthesize, run by
+"""Deep-research orchestration: plan then search then read then synthesize, run by
 the arq worker (see app/worker.py).
 
 Progress is published to Redis pub/sub channel "research:{job_id}" as JSON
-events — the SSE endpoint in routers/research.py subscribes and forwards
-them. The job row in Postgres is updated at each stage so plain polling
-(GET /v1/research/{id}) works too, and survives worker restarts.
+events. The SSE endpoint in routers/research.py subscribes and forwards
+them. The job row in postgres is updated at each stage so plain polling
+works too, and survives worker restarts.
 
 Events:
   {"type":"progress","stage","progress","message"}
@@ -124,7 +124,7 @@ async def _research(job, db, redis) -> tuple[str, list[dict]]:
         queries = [job.query]
     await _check_cancelled(redis, job_id)
 
-    # 2. search — gather candidate sources, deduped by URL
+    # 2. search n gather candidate sources, deduped by URL
     candidates: list[dict] = []
     seen: set[str] = set()
     for i, q in enumerate(queries):
@@ -142,7 +142,7 @@ async def _research(job, db, redis) -> tuple[str, list[dict]]:
     if not candidates:
         raise RuntimeError("no search results found for any query")
 
-    # 3. read — fetch the top pages
+    # 3. read n fetch the top pages
     sources: list[dict] = []
     to_read = candidates[: settings.RESEARCH_MAX_SOURCES]
     for i, c in enumerate(to_read):

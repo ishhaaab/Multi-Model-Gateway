@@ -34,7 +34,7 @@ async def load_preset(preset_id, user_id, db: AsyncSession):
         )
     else:
         # if no preset is chosen, we fall back to the user's "Default" preset that is created at
-        # user reg. If preset is missing, we return None and stream_tokens uses
+        # user reg. If preset is missing, we return None and stream_tokens func uses
         # the hardcoded safe defaults.
         result = await db.execute(
             select(Preset)
@@ -84,9 +84,9 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
         # Cloud providers report accurate usage in the final stream chunk.
         extra_params = {"stream_options": {"include_usage": True}}
     else:
-        # LM Studio has sampling params via extra_body. We do NOT send
-        # stream_options as some LM Studio builds stop streaming token-by-token
-        # when it's present (usage then falls back to the streamed-chunk count).
+        # LM Studio has sampling params via extra_body. gang we do NOT send
+        # stream_options as some LM Studio builds stop streaming token by token
+        # when it's present (usage then falls back to the streamed chunk count).
         extra_params = {
             "extra_body": {
                 "top_k": preset.top_k if (preset and preset.top_k is not None) else DEFAULT_TOP_K,
@@ -131,7 +131,7 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
                 token_count += 1
                 yield f"data: {content}\n\n"
     except Exception as e:
-        # provider died mid-generation: keep whatever streamed so far so the
+        # provider died mid gen: keep whatever streamed so far so the
         # exchange isn't lost, and end the stream cleanly instead of crashing
         # without [DONE]
         logger.error("Stream interrupted mid-generation: %s", repr(e))

@@ -59,6 +59,6 @@ async def retrieve_memories(conversation_id: str, query: str, db: AsyncSession):
         rows = result.fetchall()
     except Exception as e:
         logger.warning("memory retrieval failed (%r); skipping memory context", e)
-        await db.rollback()  # clear the failed-transaction state so the session stays usable
+        await db.rollback()  # clear the failed transaction state so the session stays usable
         return []
     return [{"role": r.role, "content": r.content, "created_at": r.created_at} for r in rows]

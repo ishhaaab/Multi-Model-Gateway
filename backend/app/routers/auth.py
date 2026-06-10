@@ -64,13 +64,13 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
         raise HTTPException(status_code=400, detail="user already exists")
 
     # single transaction: user + default preset + default template all land
-    # or none do, so a failure can't leave a half-initialised account. The
-    # IntegrityError catch covers the register-register race the select
-    # above can't (email is unique in the DB).
+    # or none do, so a failure can't leave a half init account. The
+    # Integrity err catch covers the register register race the select
+    # above can't, email is unique in the DB .
     try:
         new_user = User(email=user_data.email, hashed_password=security.hash_password(user_data.password))
         db.add(new_user)
-        await db.flush()  # assign new_user.id; surfaces duplicate email
+        await db.flush()  # assign new user id; surfaces duplicate email
 
         # a default model parameter preset for LLMs
         db.add(Preset(

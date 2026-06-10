@@ -16,7 +16,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # lifespan (not on_event) so the MCP connections open and close in the
-    # same task — anyio cancel scopes inside the MCP SDK require that
+    # same task anyio cancel scopes inside the MCP SDK require that
     await get_redis()           # warm the connection pool
     await mcp_manager.startup() # connect configured MCP servers, register their tools
     yield
@@ -48,8 +48,8 @@ app.add_middleware(RateLimitMiddleware)
 
 @app.exception_handler(AppError)
 async def app_error_handler(request: Request, exc: AppError):
-    # Translate service-layer domain errors into HTTP at the API boundary.
-    # Matches FastAPI's default error shape ({"detail": ...}); one handler
+    # Translate service domain errors into HTTP at the API boundary.
+    # set to match FastAPI's default error shape 
     # covers every AppError subclass (Starlette walks the exception's MRO).
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 

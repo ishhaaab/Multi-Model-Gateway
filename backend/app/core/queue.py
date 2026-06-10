@@ -1,4 +1,4 @@
-"""Lazy arq enqueue pool for the API process (the worker has its own)."""
+"""Lazy arq enqueue pool for the API process ; worker has its own."""
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
 

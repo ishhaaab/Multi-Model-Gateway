@@ -38,7 +38,7 @@ def _job_summary(job: ResearchJob) -> dict:
 async def _get_owned_job(job_id: str, user_id: str, db: AsyncSession) -> ResearchJob:
     result = await db.execute(select(ResearchJob).where(ResearchJob.id == job_id))
     job = result.scalar_one_or_none()
-    # 404 for both missing and non-owned, so job ids can't be enumerated
+    # 404 for both missing and non owned, so job ids canyt be enumerated
     if job is None or str(job.user_id) != str(user_id):
         raise HTTPException(status_code=404, detail="research job not found")
     return job
@@ -106,7 +106,7 @@ async def cancel_research(
     await redis.set(CANCEL_KEY.format(job_id=job_id), "1", ex=3600)
 
     if job.status == "queued":
-        # not picked up yet — cancel directly (worker skips non-queued jobs)
+        # not picked up yet then cancel directly so here worker skips non queued jobs
         job.status = "cancelled"
         await db.commit()
         await redis.publish(CHANNEL.format(job_id=job_id),

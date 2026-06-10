@@ -52,7 +52,7 @@ async def messages_get(convo_id: str, db: AsyncSession = Depends(get_db), user_i
     if str(conversation.user_id) != str(user_id):
         raise HTTPException(status_code=403, detail="unauthorised user")
     
-    # explicit ordering — Postgres gives no guarantee without it, and the
+    # explicit ordering as postgres gives no guarantee without it, and the
     # chat history must render in exchange order
     messages_result = await db.execute(
         select(Message)
@@ -96,7 +96,7 @@ async def convo_delete(convo_id: str, db: AsyncSession= Depends(get_db), user_id
     return {"message": "conversation deleted"}
 
 
-# ───────────── Message-level operations ─────────────
+# Message-level operations 
 
 class MessageEdit(BaseModel):
     content: str

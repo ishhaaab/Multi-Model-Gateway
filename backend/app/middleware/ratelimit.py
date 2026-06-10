@@ -46,7 +46,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Unique member so multiple requests within the same second are each counted.
         member = f"{now}:{uuid.uuid4().hex}"
 
-        # Fail open: a Redis outage degrades to "no rate limiting" instead of
+        # a Redis outage degrades to no rate limiting instead of
         # turning every request in the app into a 500.
         try:
             redis = await get_redis()
@@ -86,7 +86,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     def _client_ip(self, request: Request) -> str:
         # Behind a Caddy, the real client IP is the
-        # first hop in X-Forwarded-For; fall back to the direct peer.
+        # first hop in X forwarded for; fall back to the direct peer.
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
             return forwarded.split(",")[0].strip()

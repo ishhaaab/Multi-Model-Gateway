@@ -17,9 +17,10 @@ from app.services.tools import registry
 router = APIRouter()
 
 
-# agentic counterpart of /chat/completions: same request body, but the
-# response is a structured SSE stream (see services/agent.py docstring) —
-# the plain-token parser in api-client.ts cannot read this route.
+# agentic counterpart of /chat/completions:
+# has the same request body, but the
+# response is a structured SSE stream (see services/agent.py docstring) 
+# FUTURE FRONTEND FIX: the plain token parser in api-client.ts cannot read this route
 @router.post("/agent/chat")
 async def agent_chat(
     request: ChatRequest,

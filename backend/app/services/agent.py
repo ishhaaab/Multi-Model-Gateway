@@ -1,14 +1,15 @@
-"""Agent loop: model ⇄ tool execution, streamed over structured SSE.
+"""Agent loop: model to and fro w tool execution, streamed over structured SSE.
 
-Each round calls the model non-streamed with the user's allowed tool schemas
-(per the roadmap's "simplest first cut": tool-decision rounds are not
-token-streamed; only completed events are pushed). Tool calls are executed
-through the registry — permission-checked and timeout-bounded — and the
-results are appended as role:"tool" messages before re-calling the model.
+Each round calls the model non streamed with the user's allowed tool schemas
+(tool-decision rounds are not token streamed; only completed events are pushed). 
+Tool calls are executed
+through the registry with permissions checked and timeout bounded and the
+results are appended as role:"tool" messages before re calling the model.
 The loop ends when the model answers without tool calls, the iteration cap
-is reached, or the token budget is spent (both force a final tool-less round).
+is reached, or the token budget is spent both force a final tool less round.
+<insert no bitches megamind gif>
 
-SSE schema — one JSON object per `data:` line. This is richer than the plain
+SSE schema is one JSON object per `data:` line. This is richer than the plain
 token stream of /chat/completions, so the frontend needs a dedicated parser
 for this route:
   {"type":"tool_call",   "id", "name", "arguments"}
@@ -113,7 +114,7 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
         completion_tok = 0
         final_answer = ""
 
-        # +1 lap: the last one always runs tool-less so a final answer is produced
+        # +1 lap: the last one always runs tool less so a final answer is produced
         for iteration in range(settings.AGENT_MAX_ITERATIONS + 1):
             over_budget = (prompt_tok + completion_tok) > settings.AGENT_TOKEN_BUDGET
             offer_tools = bool(tool_schemas) and not over_budget and iteration < settings.AGENT_MAX_ITERATIONS
@@ -185,7 +186,7 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
         yield _sse({"type": "done", "conversation_id": conversation_id})
     except AppError as e:
         # raised inside the stream, after headers are sent, so the global
-        # handler can't translate it — surface it as an SSE error event
+        # handler can't translate it so surface it as an SSE error event
         yield _sse({"type": "error", "message": e.detail})
         yield _sse({"type": "done", "conversation_id": conversation_id})
     except Exception as e:

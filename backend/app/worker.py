@@ -1,9 +1,9 @@
-"""arq worker bootstrap — run as its own compose service:
+"""arq worker bootstrap, run as its own compose service:
 
     arq app.worker.WorkerSettings
 
 arq was chosen over RQ/Celery because the whole codebase is async
-(asyncpg, httpx); arq runs coroutines natively on one loop instead of
+asyncpg, httpx and arq runs coroutines natively on one loop instead of
 wrapping each job in asyncio.run.
 """
 from arq.connections import RedisSettings

@@ -26,8 +26,8 @@ class Settings(BaseSettings):
 
     OPENROUTER_DEFAULT_MODEL: str= ""
 
-    # ── Agent / MCP tools ──
-    AGENT_MAX_ITERATIONS: int = 6        # hard cap on model⇄tool round-trips per run
+    # Agent / MCP tools
+    AGENT_MAX_ITERATIONS: int = 6        # hard cap on model to tool round-trips per run
     AGENT_TOKEN_BUDGET: int = 24000      # total prompt+completion tokens per agent run
     TOOL_TIMEOUT_SECONDS: int = 30       # per tool execution
     TOOL_RESULT_MAX_CHARS: int = 8000    # tool output fed back to the model is truncated to this
@@ -38,14 +38,14 @@ class Settings(BaseSettings):
     #  {"name":"remote","transport":"sse","url":"http://mcp-host:8080/sse"}]
     MCP_SERVERS: str = ""
 
-    # ── Deep research ──
+    # Deep research 
     RESEARCH_MAX_QUERIES: int = 4          # search queries the planner may issue
     RESEARCH_RESULTS_PER_QUERY: int = 4    # results kept per search
     RESEARCH_MAX_SOURCES: int = 6          # pages actually fetched and read
     RESEARCH_PAGE_MAX_CHARS: int = 6000    # per-page text fed to the synthesizer
     RESEARCH_JOB_TIMEOUT_SECONDS: int = 900
 
-    # ── Ollama (embeddings + cookbook catalog) ──
+    # Ollama (embeddings + cookbook catalog) 
     OLLAMA_URL: str = "http://host.docker.internal:11434"
     EMBED_MODEL: str = "nomic-embed-text:latest"
     COOKBOOK_CONTEXT_TOKENS: int = 8192    # context size assumed for KV-cache estimates
