@@ -30,6 +30,41 @@ services:
     depends_on:
       - postgres
       - redis
+    # For GPU-aware fit scoring (/v1/hardware, /v1/cookbook) give the backend
+    # GPU access (needs nvidia-container-toolkit); without it the endpoints
+    # degrade to cpu_only verdicts:
+    gpus: all
+
+  # deep-research job worker (arq, Redis broker)
+  worker:
+    build:
+      context: ./backend
+      target: dev
+    command: arq app.worker.WorkerSettings
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    secrets:
+      - ollama_api_key
+      - openrouter_api_key
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - postgres
+      - redis
+
+  # optional self-hosted search for web_search + deep research:
+  # start with `docker compose --profile search up` and set
+  # SEARXNG_URL=http://searxng:8080 in .env (otherwise DuckDuckGo is used)
+  searxng:
+    image: searxng/searxng
+    profiles: ["search"]
+    volumes:
+      - ./searxng:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080/
+
   prometheus:
     image: prom/prometheus
     ports:

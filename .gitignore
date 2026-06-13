@@ -4,8 +4,11 @@ __pycache__/
 .DS_Store
 *.egg-info
 .pytest_cache
-useless/
 alembic/versions/__pycache__/
 .expo/
 node_modules/
-by-v0/
+docs/
+.claude/
+secrets/
+frontend/.env.production
+*.png

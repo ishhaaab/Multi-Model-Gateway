@@ -155,7 +155,15 @@ async def convo_branch(convo_id: str, body: BranchRequest, db: AsyncSession = De
     result = await db.execute(select(Message).where(Message.conversation_id == convo_id))
     to_copy = [m for m in result.scalars().all() if (m.index if m.index is not None else 0) <= cutoff]
 
-    branch = Conversation(title=f"{source.title} (branch)", user_id=user_id)
+    branch = Conversation(
+        title=f"{source.title} (branch)",
+        user_id=user_id,
+        # lineage: which conversation this forked from, and at which message
+        parent_id=source.id,
+        branched_from_message_id=target.id,
+        # carry over the copied turns' usage so the branch doesn't start at 0
+        token_count=sum(m.tokens_used or 0 for m in to_copy),
+    )
     db.add(branch)
     await db.flush()  # assign branch.id before copying messages into it
 
