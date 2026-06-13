@@ -117,6 +117,16 @@ h3 {
   outline: none;
 }
 
+/* One-shot coral flash for "jump to forked message" (branch lineage). */
+@keyframes branch-flash {
+  0% { background-color: rgba(255, 101, 63, 0.22); }
+  100% { background-color: transparent; }
+}
+.gw-flash {
+  animation: branch-flash 1.8s ease-out both;
+  border-radius: 14px;
+}
+
 ::selection {
   background: rgba(255, 101, 63, 0.3);
   color: var(--color-text-primary);

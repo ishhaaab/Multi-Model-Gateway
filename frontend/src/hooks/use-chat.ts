@@ -102,11 +102,16 @@ export function useChat() {
     abortRef.current?.abort();
     abortRef.current = null;
     const s = useChatStore.getState();
+    const userContent = pendingUserContent;
+    const partial = s.streamedContent;
     s.setStreaming(false);
+    // Freeze the in-flight turn so the user's input + partial reply stay put.
+    // The backend doesn't persist a cancelled turn, so the old refetch wiped it
+    // (reverting to the welcome screen or dropping the prompt) — keep it instead.
+    if (userContent) s.appendPausedTurn(userContent, partial);
     s.clearStream();
     setPendingUserContent(null);
-    if (s.activeConversationId) s.fetchMessages(s.activeConversationId);
-  }, []);
+  }, [pendingUserContent]);
 
   const retryLast = useCallback(() => {
     const last = lastAttemptRef.current;

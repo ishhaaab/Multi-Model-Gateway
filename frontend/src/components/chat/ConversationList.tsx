@@ -95,7 +95,7 @@ export function ConversationList() {
           return (
             <li
               key={c.id}
-              className="animate-slide-up"
+              className="animate-fade-in"
               style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }}
             >
               <div
@@ -154,8 +154,17 @@ export function ConversationList() {
                 )}
 
                 {menuId === c.id && (
+                  <>
+                  {/* Backdrop — swallows clicks so underlying chats can't be selected */}
                   <div
-                    className="absolute right-1 top-[calc(100%-4px)] z-30 w-36 overflow-hidden rounded-lg border border-border bg-bg-secondary p-1 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.7)] animate-fade-in"
+                    className="fixed inset-0 z-40"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuId(null);
+                    }}
+                  />
+                  <div
+                    className="absolute right-1 top-[calc(100%-4px)] z-50 w-36 overflow-hidden rounded-lg border border-border bg-bg-secondary p-1 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.7)] animate-fade-in"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button
@@ -174,6 +183,7 @@ export function ConversationList() {
                       <Trash2 size={14} /> Delete
                     </button>
                   </div>
+                  </>
                 )}
               </div>
             </li>

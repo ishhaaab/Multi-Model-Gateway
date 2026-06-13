@@ -46,11 +46,15 @@ interface ChatState {
   fetchMessages: (id: string) => Promise<void>;
   renameConversation: (id: string, title: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
+  editMessage: (id: string, content: string) => Promise<void>;
+  deleteMessage: (id: string) => Promise<void>;
+  branchConversation: (messageId: string) => Promise<string | null>;
 
   appendToStream: (content: string) => void;
   setStreaming: (streaming: boolean) => void;
   clearStream: () => void;
   setStreamError: (err: string | null) => void;
+  appendPausedTurn: (userContent: string, assistantContent: string) => void;
 
   setProvider: (p: Provider) => void;
   setModelSelection: (provider: Provider, model: string) => void;
@@ -108,7 +112,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ loadingMessages: true });
     try {
       const messages = await convoApi.getMessages(id);
-      set({ messages: sortMessages(messages) });
+      const sorted = sortMessages(messages);
+      set({ messages: sorted });
+      // Per-chat model memory: reuse the model this conversation last used, so
+      // each chat keeps its own model until the user picks a different one.
+      // (provider is derived the same way the rest of the app does — "/" = OpenRouter.)
+      const lastModel = [...sorted]
+        .reverse()
+        .find((m) => m.role === "assistant" && m.model_used)?.model_used;
+      if (lastModel) {
+        set({ provider: lastModel.includes("/") ? "openrouter" : "local", model: lastModel });
+      }
     } finally {
       set({ loadingMessages: false });
     }
@@ -135,6 +149,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
+  editMessage: async (id, content) => {
+    const cid = get().activeConversationId;
+    if (!cid) return;
+    await convoApi.editMessage(cid, id, content);
+    set((state) => ({
+      messages: state.messages.map((m) => (m.id === id ? { ...m, content } : m)),
+    }));
+  },
+
+  deleteMessage: async (id) => {
+    const cid = get().activeConversationId;
+    if (!cid) return;
+    await convoApi.deleteMessage(cid, id);
+    set((state) => ({ messages: state.messages.filter((m) => m.id !== id) }));
+  },
+
+  branchConversation: async (messageId) => {
+    const cid = get().activeConversationId;
+    if (!cid) return null;
+    const { id } = await convoApi.branch(cid, messageId);
+    await get().fetchConversations();
+    return id;
+  },
+
   appendToStream: (content) =>
     set((state) => ({ streamedContent: state.streamedContent + content })),
 
@@ -144,8 +182,45 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setStreamError: (err) => set({ streamError: err }),
 
+  // Freeze a cancelled in-flight turn into the message list. The backend never
+  // persists a cancelled turn, so this keeps the user's input + partial reply
+  // visible instead of vanishing on cancel.
+  appendPausedTurn: (userContent, assistantContent) =>
+    set((state) => {
+      const baseIndex = state.messages.reduce((max, m) => Math.max(max, m.index ?? 0), 0);
+      const now = new Date().toISOString();
+      const convoId = state.activeConversationId ?? "";
+      const items: Message[] = [
+        {
+          id: `local-user-${Date.now()}`,
+          conversation_id: convoId,
+          role: "user",
+          content: userContent,
+          created_at: now,
+          model_used: null,
+          tokens_used: null,
+          index: baseIndex + 1,
+        },
+      ];
+      if (assistantContent) {
+        items.push({
+          id: `local-asst-${Date.now()}`,
+          conversation_id: convoId,
+          role: "assistant",
+          content: assistantContent,
+          created_at: now,
+          model_used: null,
+          tokens_used: null,
+          index: baseIndex + 2,
+        });
+      }
+      return { messages: [...state.messages, ...items] };
+    }),
+
   setProvider: (p) => set({ provider: p }),
-  setModelSelection: (provider, model) => set({ provider, model }),
+  setModelSelection: (provider, model) =>
+    // Picking a local model defaults privacy on (keeps inference off the cloud).
+    set(provider === "local" ? { provider, model, isPrivate: true } : { provider, model }),
   setPresetId: (id) => set({ presetId: id }),
   setPrivate: (v) => set({ isPrivate: v }),
 }));

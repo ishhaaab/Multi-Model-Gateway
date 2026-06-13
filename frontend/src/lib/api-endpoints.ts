@@ -58,6 +58,24 @@ export const convoApi = {
 
   delete: (id: string) =>
     apiClient.request<{ message: string }>("DELETE", `/v1/convo/${id}`),
+
+  editMessage: (convoId: string, messageId: string, content: string) =>
+    apiClient.request<{ message: string }>(
+      "PATCH",
+      `/v1/convo/${convoId}/messages/${messageId}`,
+      { content }
+    ),
+
+  deleteMessage: (convoId: string, messageId: string) =>
+    apiClient.request<{ message: string }>(
+      "DELETE",
+      `/v1/convo/${convoId}/messages/${messageId}`
+    ),
+
+  branch: (convoId: string, messageId: string) =>
+    apiClient.request<{ id: string }>("POST", `/v1/convo/${convoId}/branch`, {
+      message_id: messageId,
+    }),
 };
 
 // ───────────── Presets ({ data: [...] }) ─────────────

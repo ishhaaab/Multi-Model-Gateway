@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles, AlertTriangle, RotateCw } from "lucide-react";
 import type { Message } from "@/lib/types";
 import { MessageBubble } from "./MessageBubble";
@@ -12,6 +12,9 @@ interface MessageListProps {
   isStreaming: boolean;
   streamError: string | null;
   onRetry: () => void;
+  onRegenerate?: () => void;
+  /** Scroll to + flash this message once it's loaded (branch "jump to fork"). */
+  jumpToId?: string | null;
 }
 
 export function MessageList({
@@ -22,6 +25,8 @@ export function MessageList({
   isStreaming,
   streamError,
   onRetry,
+  onRegenerate,
+  jumpToId,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -44,6 +49,22 @@ export function MessageList({
     if (justSent) stickRef.current = true;
     if (stickRef.current) bottomRef.current?.scrollIntoView({ behavior: "auto" });
   }, [messages.length, streamedContent, pendingUserContent, isStreaming]);
+
+  // Branch lineage jump: once the target message is rendered, center it and
+  // flash it. One-shot per jump target; declared after the stick effect so its
+  // scroll wins, and it un-sticks the list so bottom-follow doesn't fight it.
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const jumpedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!jumpToId || loading || jumpedRef.current === jumpToId) return;
+    if (!messages.some((m) => m.id === jumpToId)) return;
+    jumpedRef.current = jumpToId;
+    stickRef.current = false;
+    requestAnimationFrame(() => {
+      document.getElementById(`msg-${jumpToId}`)?.scrollIntoView({ block: "center" });
+      setFlashId(jumpToId);
+    });
+  }, [jumpToId, loading, messages]);
 
   if (loading && messages.length === 0) {
     return (
@@ -72,16 +93,22 @@ export function MessageList({
     );
   }
 
+  const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id;
+
   return (
     <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
         {messages.map((m) => (
-          <MessageBubble
-            key={m.id}
-            role={m.role}
-            content={m.content}
-            message={m}
-          />
+          <div key={m.id} id={`msg-${m.id}`} className={m.id === flashId ? "gw-flash" : undefined}>
+            <MessageBubble
+              role={m.role}
+              content={m.content}
+              message={m}
+              onRegenerate={
+                m.role === "assistant" && m.id === lastAssistantId ? onRegenerate : undefined
+              }
+            />
+          </div>
         ))}
 
         {/* Optimistic in-flight turn */}

@@ -48,6 +48,9 @@ export interface Conversation {
   title: string;
   created_at: string;
   token_count: number;
+  // Branch lineage: set when this conversation was forked from another.
+  parent_id: string | null;
+  branched_from_message_id: string | null;
 }
 
 export interface Message {
