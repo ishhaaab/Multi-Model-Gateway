@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.metrics import record_metrics
+from app.core.background import spawn
 from app.models.presets import (
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_K,
@@ -38,6 +39,7 @@ from app.models.presets import (
 )
 from app.models.tool_permissions import ToolPermission
 from app.services.convo import conversation, load_history, save_messages
+from app.services.memory import store_exchange_memories
 from app.services.router import ChatRequest, get_provider
 from app.services.tools import registry
 
@@ -100,6 +102,7 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
 
         client, model = await get_provider(request)
         is_cloud = "openrouter" in str(client.base_url).lower()
+        resolved_provider = "openrouter" if is_cloud else "local"  # CR-6: resolved, not "auto"
         # mirror the chat path: LM Studio takes extra sampling params via extra_body
         extra_params = {} if is_cloud else {
             "extra_body": {
@@ -113,6 +116,7 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
         prompt_tok = 0
         completion_tok = 0
         final_answer = ""
+        truncated = False
 
         # +1 lap: the last one always runs tool less so a final answer is produced
         for iteration in range(settings.AGENT_MAX_ITERATIONS + 1):
@@ -140,6 +144,9 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
             tool_calls = msg.tool_calls or []
             if not tool_calls or not offer_tools:
                 final_answer = msg.content or ""
+                # tools were withheld due to the iteration cap / token budget (not because
+                # the model finished) → the answer may be incomplete (issues.md CR-8)
+                truncated = bool(tool_schemas) and not offer_tools
                 break
 
             messages.append({
@@ -174,11 +181,15 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
             yield _sse({"type": "token", "content": final_answer})
 
         elapsed = time.time() - start_time
-        await save_messages(conversation_id, user_content, final_answer, model, completion_tok, db)
-        record_metrics(request.provider.value, model, elapsed, prompt_tok, completion_tok,
-                       messages, final_answer, conversation_id)
+        await save_messages(conversation_id, user_content, final_answer, model, prompt_tok, completion_tok, db)
+        # off the response path: embeddings + tracing (metadata-only for private chats)
+        spawn(store_exchange_memories(conversation_id, user_content, final_answer))
+        spawn(asyncio.to_thread(
+            record_metrics, resolved_provider, model, elapsed, prompt_tok, completion_tok,
+            messages, final_answer, conversation_id, not request.private,
+        ))
 
-        yield _sse({"type": "done", "conversation_id": conversation_id})
+        yield _sse({"type": "done", "conversation_id": conversation_id, "truncated": truncated})
 
     except APIError as e:
         logger.error("Provider API error in agent run: %s", repr(e))

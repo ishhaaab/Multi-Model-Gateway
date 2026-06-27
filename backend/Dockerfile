@@ -1,5 +1,11 @@
 FROM python:3.11-slim AS base
 
+# Prefer IPv4 when resolving host.docker.internal. Docker Desktop also publishes
+# an IPv6 host-gateway that isn't routable from the container, and glibc otherwise
+# tries it first — causing "Network is unreachable" on host calls to LM Studio /
+# ComfyUI. This precedence rule makes IPv4(-mapped) addresses win.
+RUN echo 'precedence ::ffff:0:0/96 100' >> /etc/gai.conf
+
 WORKDIR /app
 
 COPY requirements.txt .

@@ -11,8 +11,9 @@ from app.models.memories import Memory
 logger = logging.getLogger(__name__)
 
 
-EMBED_URL = f"{settings.OLLAMA_URL}/api/embeddings"
-EMBED_MODEL = settings.EMBED_MODEL
+# LM Studio's OpenAI-compatible embeddings endpoint (load an embedding model there).
+EMBED_URL = f"{settings.LM_URL}/v1/embeddings"
+EMBED_MODEL = settings.LM_EMBED_MODEL
 
 async def get_embedding(content: str) -> list[float] | None:
     """Return an embedding vector, or None if the embedding service is
@@ -22,13 +23,25 @@ async def get_embedding(content: str) -> list[float] | None:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
                 EMBED_URL,
-                json={"model": EMBED_MODEL, "prompt": content},
+                json={"model": EMBED_MODEL, "input": content},
             )
             response.raise_for_status()
-            return response.json()["embedding"]
-    except (httpx.HTTPError, KeyError, ValueError) as e:
+            vector = response.json()["data"][0]["embedding"]
+    except (httpx.HTTPError, KeyError, IndexError, ValueError) as e:
         logger.warning("embedding request failed (%s); skipping memory", e)
         return None
+    # Guard against an embedder whose dimension doesn't match the pgvector column
+    # (e.g. EMBED_MODEL was changed). Inserting a mismatched vector would error;
+    # fail loud here and skip instead of silently corrupting memory.
+    if not isinstance(vector, list) or len(vector) != settings.EMBED_DIM:
+        logger.warning(
+            "embedding dimension mismatch (got %s, expected %d); skipping memory — "
+            "did EMBED_MODEL change without a migrate+reindex?",
+            len(vector) if isinstance(vector, list) else type(vector).__name__,
+            settings.EMBED_DIM,
+        )
+        return None
+    return vector
 
 
 async def store_memory(conversation_id: str, role: str, content: str, db: AsyncSession):
@@ -44,6 +57,19 @@ async def store_memory(conversation_id: str, role: str, content: str, db: AsyncS
     )
     db.add(memory)
     await db.commit()
+
+
+async def store_exchange_memories(conversation_id: str, user_content: str, assistant_content: str):
+    """Embed + store both sides of an exchange on a fresh session.
+
+    Called as a background task (see core/background.spawn) so the embedding
+    round-trips never sit on the chat response's critical path.
+    """
+    from app.db import AsyncSessionLocal  # local import avoids a circular import at module load
+
+    async with AsyncSessionLocal() as db:
+        await store_memory(conversation_id, role="user", content=user_content, db=db)
+        await store_memory(conversation_id, role="assistant", content=assistant_content, db=db)
 
 
 async def retrieve_memories(conversation_id: str, query: str, db: AsyncSession):

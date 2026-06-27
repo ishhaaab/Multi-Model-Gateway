@@ -9,6 +9,14 @@ wrapping each job in asyncio.run.
 from arq.connections import RedisSettings
 
 from app.core.config import settings
+# Register every model so SQLAlchemy can resolve cross-table foreign keys in this
+# process. The worker only imports ResearchJob transitively, so without this its
+# FK research_jobs.user_id -> users.id can't find the 'users' table at mapper-config
+# time (NoReferencedTableError). Mirrors what alembic/env.py imports.
+from app.models import (  # noqa: F401
+    users, conversations, messages, refresh_tokens,
+    presets, templates, memories, workflows, tool_permissions, research_jobs,
+)
 from app.services.research import run_research_job
 
 

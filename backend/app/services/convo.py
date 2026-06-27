@@ -8,7 +8,7 @@ from app.core.exceptions import NotFoundError, ForbiddenError
 from app.models.conversations import Conversation
 from app.models.messages import Message
 
-from app.services.memory import store_memory, retrieve_memories
+from app.services.memory import retrieve_memories
 
 
 async def conversation(request, user_id: str, db: AsyncSession) -> str:
@@ -126,7 +126,7 @@ async def load_history(conversation_id: str, query: str, db: AsyncSession) -> li
     return recent
 
 
-async def save_messages(conversation_id: str, user_content: str, assistant_content: str, model: str, token_count, db: AsyncSession):
+async def save_messages(conversation_id: str, user_content: str, assistant_content: str, model: str, prompt_tok, completion_tok, db: AsyncSession):
     # Lock the conversation row for the duration of the transaction so two
     # concurrent sends can't both read the same max(index) and allocate
     # colliding indices (which would corrupt the exchange invariant).
@@ -153,16 +153,16 @@ async def save_messages(conversation_id: str, user_content: str, assistant_conte
         role="assistant",
         content=assistant_content,
         model_used=model,
-        tokens_used= token_count,
+        tokens_used= completion_tok,
         index= assistant_index
     )
     db.add(user_msg)
     db.add(assistant_msg)
     if convo:
-        convo.token_count = (convo.token_count or 0) + token_count
+        # count BOTH sides — completion-only undercounted real usage (issues.md CR-10)
+        convo.token_count = (convo.token_count or 0) + (prompt_tok or 0) + (completion_tok or 0)
     # one commit: both messages + token count land together (and release the lock)
     await db.commit()
-
-    await store_memory(conversation_id, role="user", content=user_content, db= db)
-    await store_memory(conversation_id, role="assistant", content=assistant_content, db= db)
+    # Embeddings are stored by the caller via background.spawn(store_exchange_memories(...))
+    # so the Ollama round-trips never sit on the response's critical path.
 

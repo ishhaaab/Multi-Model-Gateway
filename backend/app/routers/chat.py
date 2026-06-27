@@ -3,15 +3,18 @@ from fastapi.responses import StreamingResponse
 from openai import APIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import asyncio
 import time
 import logging
 
-from app.db import get_db
+from app.db import get_db, AsyncSessionLocal
 
 from app.core.security import get_current_user
 from app.core.metrics import record_metrics
+from app.core.background import spawn
 
 from app.services.convo import conversation, load_history, save_messages, get_last_exchanges, detect_recall_request
+from app.services.memory import store_exchange_memories
 from app.services.router import get_provider, ChatRequest, Provider
 
 from app.models.presets import (
@@ -75,6 +78,15 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
 
     client, model = await get_provider(request)
     is_cloud = "openrouter" in str(client.base_url).lower()
+    resolved_provider = "openrouter" if is_cloud else "local"  # CR-6: log the resolved provider, not "auto"
+
+    # Release the DB connection back to the pool BEFORE the (up-to-minute) stream —
+    # all reads are done, and holding an idle connection across the stream is what
+    # exhausts the pool under concurrency (issues.md CR-3). The final write uses a
+    # fresh short-lived session. get_db's own close() afterwards is then a no-op.
+    user_content = request.messages[-1].content
+    await db.close()
+
     start_time = time.time()
     token_count = 0
     full_response = ""
@@ -149,8 +161,16 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
 
     # on a mid-stream failure with nothing generated there is no exchange to save
     if full_response or not stream_error:
-        await save_messages(conversation_id, request.messages[-1].content, full_response, model, completion_tok, db)
-        record_metrics(request.provider.value, model, elapsed, prompt_tok, completion_tok, messages, full_response, conversation_id)
+        # fresh short-lived session — the request's own connection was released above
+        async with AsyncSessionLocal() as save_db:
+            await save_messages(conversation_id, user_content, full_response, model, prompt_tok, completion_tok, save_db)
+        # off the response path: embeddings (slow Ollama round-trips) + tracing.
+        # record_content=False for private chats so message text never reaches Langfuse (CR-2).
+        spawn(store_exchange_memories(conversation_id, user_content, full_response))
+        spawn(asyncio.to_thread(
+            record_metrics, resolved_provider, model, elapsed, prompt_tok, completion_tok,
+            messages, full_response, conversation_id, not request.private,
+        ))
 
     if stream_error:
         yield "data: [ERROR] stream interrupted\n\n"

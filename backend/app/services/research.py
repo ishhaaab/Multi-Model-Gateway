@@ -39,10 +39,10 @@ No explanations, no markdown."""
 
 SYNTH_PROMPT = """You are a research analyst. Answer the user's research question
 using ONLY the numbered sources below. Rules:
-- Cite sources inline as [n] after each claim they support.
+- Cite sources inline using their bracketed number, e.g. [1] or [2], after each claim.
 - If sources conflict, say so and cite both.
 - If the sources are insufficient for part of the question, state that openly.
-- End with a "Sources" section listing each [n] with its title and URL.
+- End with a "Sources" section listing each number (e.g. [1]) with its title and URL.
 
 {sources_block}"""
 

@@ -13,7 +13,8 @@ class Provider(str, Enum):
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    # bound the message size so an unbounded payload can't OOM the process (issues.md MED-6)
+    content: str = Field(max_length=100_000)
 
 
 

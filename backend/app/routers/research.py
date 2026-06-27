@@ -50,6 +50,20 @@ async def create_research(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
+    # idempotency: if the same query is already queued/running for this user, return
+    # that job instead of enqueuing a duplicate multi-minute run (issues.md CR-13)
+    existing = (await db.execute(
+        select(ResearchJob)
+        .where(
+            ResearchJob.user_id == user_id,
+            ResearchJob.query == request.query,
+            ResearchJob.status.in_(("queued", "running")),
+        )
+        .limit(1)
+    )).scalar_one_or_none()
+    if existing is not None:
+        return {"job_id": str(existing.id), "status": existing.status}
+
     job = ResearchJob(
         id=uuid.uuid4(),
         user_id=user_id,

@@ -45,7 +45,14 @@ from langfuse import get_client
 
 def record_metrics(provider: str, model: str, elapsed: float,
                    prompt_tok: int, completion_tok: int, messages: list,
-                   full_response: str, conversation_id: str):
+                   full_response: str, conversation_id: str,
+                   record_content: bool = True):
+    """Prometheus counters + a Langfuse generation trace.
+
+    `record_content=False` (set for `private: true` chats) records only
+    metadata — latency, token counts, model — and omits the message text and
+    the response, so a private conversation's content never leaves the box.
+    """
     total_tokens = (prompt_tok or 0) + (completion_tok or 0)
     tps = completion_tok / elapsed if elapsed > 0 and completion_tok else 0
 
@@ -64,11 +71,13 @@ def record_metrics(provider: str, model: str, elapsed: float,
         model=model,
     ) as observation:
         observation.update(
-            input={"messages": messages},
-            output={"response": full_response},
+            # content omitted entirely for private chats
+            input={"messages": messages} if record_content else None,
+            output={"response": full_response} if record_content else None,
             metadata={
                 "provider": provider,
                 "conversation_id": conversation_id,
+                "private": not record_content,
                 "latency_seconds": elapsed,
                 "tokens_per_second": tps,
                 "prompt_tokens": prompt_tok,

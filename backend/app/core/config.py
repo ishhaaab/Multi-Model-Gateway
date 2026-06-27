@@ -45,12 +45,18 @@ class Settings(BaseSettings):
     RESEARCH_PAGE_MAX_CHARS: int = 6000    # per-page text fed to the synthesizer
     RESEARCH_JOB_TIMEOUT_SECONDS: int = 900
 
-    # Ollama (embeddings + cookbook catalog) 
-    OLLAMA_URL: str = "http://host.docker.internal:11434"
-    EMBED_MODEL: str = "nomic-embed-text:latest"
+    # Embeddings (LM Studio, OpenAI-compatible /v1/embeddings)
+    # Load an embedding model in LM Studio; set this to its API id (see GET /v1/models).
+    LM_EMBED_MODEL: str = "text-embedding-nomic-embed-text-v1.5"
+    # Must match the memories.embedding column dimension (nomic-embed-text v1.5 = 768).
+    # Changing to a different-dimension embedder is a migrate-and-reindex, not just an
+    # env tweak — see issues.md CR-12.
+    EMBED_DIM: int = 768
     COOKBOOK_CONTEXT_TOKENS: int = 8192    # context size assumed for KV-cache estimates
 
     DATABASE_URL: str
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 10
     REDIS_URL: str
     
     SECRET_KEY: str
@@ -90,5 +96,4 @@ def get_secret(name: str) -> str:
         return env_value
     raise RuntimeError(f"Secret '{name}' not found at {path} or in ${name.upper()}")
 
-OLLAMA_API_KEY = get_secret("ollama_api_key")
 OPENROUTER_API_KEY = get_secret("openrouter_api_key")

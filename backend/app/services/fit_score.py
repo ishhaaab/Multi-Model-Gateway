@@ -1,8 +1,7 @@
 """VRAM-aware fit scoring for the local model catalog.
 
-Model metadata comes from LM Studio (/api/v0/models: quant, max context) and
-Ollama (/api/tags: size on disk, parameter count, quant). VRAM need is a
-documented heuristic, not a promise:
+Model metadata comes from LM Studio (/api/v0/models: quant, max context).
+VRAM need is a documented heuristic, not a promise:
 
   weights_gb ≈ size on disk          (or params_b × bytes/param for the quant)
   kv_gb      ≈ ctx_tokens × 128 KB × (params_b / 7)   # GQA-era ballpark
@@ -45,7 +44,7 @@ def _bytes_per_param(quant: str | None) -> float:
 
 
 async def get_local_models() -> list[dict]:
-    """Catalog from LM Studio + Ollama; either being down just means fewer entries."""
+    """Catalog from LM Studio (/api/v0/models); if it's down the catalog is empty."""
     models: list[dict] = []
 
     try:
@@ -65,23 +64,6 @@ async def get_local_models() -> list[dict]:
             })
     except Exception as e:
         logger.warning("LM Studio catalog unavailable: %r", e)
-
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(f"{settings.OLLAMA_URL}/api/tags")
-            response.raise_for_status()
-        for m in response.json().get("models", []):
-            details = m.get("details", {}) or {}
-            models.append({
-                "id": m.get("name", ""),
-                "source": "ollama",
-                "params_b": _parse_params_b(details.get("parameter_size", "") or m.get("name", "")),
-                "quant": details.get("quantization_level"),
-                "size_bytes": m.get("size"),
-                "max_context": None,
-            })
-    except Exception as e:
-        logger.warning("Ollama catalog unavailable: %r", e)
 
     return models
 

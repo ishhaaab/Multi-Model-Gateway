@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey 
+from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
 import uuid, datetime
@@ -12,4 +12,9 @@ class Message(Base):
     created_at= Column(DateTime, default=datetime.datetime.utcnow)
     model_used= Column(String, nullable=True)
     tokens_used= Column(Integer, default=0)
-    index = Column(Integer, nullable=True)
+    # NOT NULL + unique per conversation: the exchange invariant (user=k, assistant=k+1)
+    # depends on a total order; the DB now enforces what save_messages assumes (issues.md CR-9/DEV-2).
+    index = Column(Integer, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "index", name="uq_messages_conversation_index"),
+    )
