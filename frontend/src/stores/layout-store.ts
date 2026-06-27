@@ -12,11 +12,13 @@ interface LayoutState {
   sidebarCollapsed: boolean;
   setSidebarWidth: (w: number) => void;
   toggleSidebar: () => void;
+  setSidebarCollapsed: (v: boolean) => void;
 
   rightSidebarWidth: number;
   rightSidebarCollapsed: boolean;
   setRightSidebarWidth: (w: number) => void;
   toggleRightSidebar: () => void;
+  setRightSidebarCollapsed: (v: boolean) => void;
 }
 
 export const useLayoutStore = create<LayoutState>()(
@@ -27,6 +29,7 @@ export const useLayoutStore = create<LayoutState>()(
       setSidebarWidth: (w) =>
         set({ sidebarWidth: Math.min(Math.max(w, SIDEBAR_MIN), SIDEBAR_MAX) }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+      setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
 
       rightSidebarWidth: 340,
       rightSidebarCollapsed: false,
@@ -36,6 +39,7 @@ export const useLayoutStore = create<LayoutState>()(
         }),
       toggleRightSidebar: () =>
         set((s) => ({ rightSidebarCollapsed: !s.rightSidebarCollapsed })),
+      setRightSidebarCollapsed: (v) => set({ rightSidebarCollapsed: v }),
     }),
     { name: "llm-gateway-layout" }
   )

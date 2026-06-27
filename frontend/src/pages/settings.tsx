@@ -118,7 +118,7 @@ export default function SettingsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="border-b border-border px-6 py-4">
+      <header className="border-b border-border px-6 py-4 max-md:pl-14">
         <h1 className="text-2xl text-text-primary">Settings</h1>
         <p className="text-sm text-text-secondary">Models &amp; connection</p>
       </header>

@@ -58,7 +58,7 @@ export function ChatHeader() {
   const modelLabel = model !== "auto" ? short(model) : PROVIDER_LABEL[provider];
 
   return (
-    <header className="flex items-center justify-between gap-4 border-b border-border bg-bg-secondary/60 px-5 py-3">
+    <header className="flex items-center justify-between gap-4 border-b border-border bg-bg-secondary/60 px-5 py-3 max-md:pl-14 max-md:pr-14">
       {/* Left — title, then model + tokens for this chat */}
       <div className="flex min-w-0 items-center gap-2">
         {editing && convo ? (

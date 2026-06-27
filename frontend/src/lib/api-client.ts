@@ -260,6 +260,66 @@ class ApiClient {
       }
     }
   }
+
+  /**
+   * Generic SSE reader for endpoints that frame each `data:` line as a JSON
+   * object (agent steps, research progress). Yields the parsed objects. Unlike
+   * streamChat (plain `data: <token>`), this does NOT touch the chat parser, so
+   * existing chat streaming is unaffected. Auth/refresh is handled by request().
+   */
+  async *streamEvents<T = unknown>(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal
+  ): AsyncGenerator<T> {
+    const response = await this.request<Response>(method, path, body, {
+      stream: true,
+      signal,
+    });
+    const reader = response.body?.getReader();
+    if (!reader) throw new ApiError(0, "Streaming not supported by this browser.");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    const parse = (raw: string): T | undefined => {
+      const event = raw.replace(/\r/g, "").trim();
+      if (!event.startsWith("data:")) return undefined;
+      const payload = event.slice(5).trim();
+      if (!payload || payload === "[DONE]") return undefined;
+      try {
+        return JSON.parse(payload) as T;
+      } catch {
+        return undefined; // tolerate keep-alives / non-JSON frames
+      }
+    };
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+        for (const ev of events) {
+          const obj = parse(ev);
+          if (obj !== undefined) yield obj;
+        }
+      }
+      const tail = parse(buffer);
+      if (tail !== undefined) yield tail;
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") return;
+      throw err;
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        /* already released */
+      }
+    }
+  }
 }
 
 export const apiClient = new ApiClient({

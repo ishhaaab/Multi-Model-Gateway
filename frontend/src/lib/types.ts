@@ -208,3 +208,101 @@ export interface OpenRouterListResponse {
   data: OpenRouterModel[];
   count: number;
 }
+
+// ───────────── Agents / MCP ─────────────
+export interface AgentToolInfo {
+  name: string;
+  description: string;
+  first_party: boolean;
+  allowed: boolean;
+}
+
+// SSE events from POST /v1/agent/chat (one JSON object per `data:` line).
+export type AgentEvent =
+  | { type: "tool_call"; id: string; name: string; arguments: string }
+  | { type: "tool_result"; id: string; name: string; content: string }
+  | { type: "token"; content: string }
+  | { type: "error"; message: string }
+  | { type: "done"; conversation_id: string };
+
+// ───────────── Deep Research ─────────────
+export type ResearchStatus =
+  | "queued"
+  | "running"
+  | "complete"
+  | "cancelled"
+  | "error"
+  | "failed";
+
+export interface ResearchSource {
+  n: number;
+  title: string;
+  url: string;
+}
+
+// List item (GET /v1/research)
+export interface ResearchJob {
+  id: string;
+  query: string;
+  status: ResearchStatus;
+  stage: string | null;
+  progress: number | null;
+  created_at: string;
+}
+
+// Full job (GET /v1/research/{id})
+export interface ResearchJobDetail extends ResearchJob {
+  result: string | null;
+  sources: ResearchSource[] | null;
+  error: string | null;
+}
+
+export interface ResearchCreateResponse {
+  job_id: string;
+  status: ResearchStatus;
+}
+
+// SSE events from GET /v1/research/{id}/stream.
+export type ResearchEvent =
+  | { type: "progress"; stage: string; progress: number; message: string }
+  | { type: "done"; status: "complete"; result: string; sources: ResearchSource[] }
+  | { type: "done"; status: "cancelled" }
+  | { type: "error"; message: string };
+
+// ───────────── Cookbook / Hardware ─────────────
+export interface GpuInfo {
+  index: number;
+  name: string;
+  vram_total_mb: number;
+  vram_free_mb: number;
+}
+
+export interface HardwareInfo {
+  gpu_available: boolean;
+  gpus: GpuInfo[];
+}
+
+export type CookbookVerdict =
+  | "fits_fully"
+  | "partial_offload"
+  | "wont_fit"
+  | "cpu_only"
+  | "unknown";
+
+export interface CookbookModel {
+  id: string;
+  source: string;
+  params_b: number;
+  quant: string;
+  verdict: CookbookVerdict;
+  score: number;
+  need_gb: number;
+  rationale: string;
+}
+
+export interface CookbookResponse {
+  hardware: HardwareInfo;
+  context_tokens: number;
+  recommendation: string;
+  models: CookbookModel[];
+}

@@ -22,6 +22,15 @@ import type {
   ListEnvelope,
   LocalModel,
   OpenRouterListResponse,
+  ChatRequest,
+  AgentToolInfo,
+  AgentEvent,
+  ResearchJob,
+  ResearchJobDetail,
+  ResearchCreateResponse,
+  ResearchEvent,
+  HardwareInfo,
+  CookbookResponse,
 } from "./types";
 
 // ───────────── Auth ─────────────
@@ -153,4 +162,52 @@ export const modelApi = {
     apiClient.request<OpenRouterListResponse>("GET", "/v1/openrouter/models"),
 
   health: () => apiClient.request<{ status: string }>("GET", "/health"),
+};
+
+// ───────────── Agents / MCP ─────────────
+export const agentApi = {
+  tools: () => apiClient.request<ListEnvelope<AgentToolInfo>>("GET", "/v1/agent/tools"),
+
+  setPermission: (name: string, allowed: boolean) =>
+    apiClient.request<{ message: string }>(
+      "PUT",
+      `/v1/agent/tools/${encodeURIComponent(name)}/permission`,
+      { allowed }
+    ),
+
+  // SSE: tool_call / tool_result / token / error / done (JSON per `data:` line).
+  chatStream: (body: ChatRequest, signal?: AbortSignal) =>
+    apiClient.streamEvents<AgentEvent>("POST", "/v1/agent/chat", body, signal),
+};
+
+// ───────────── Deep Research ─────────────
+export const researchApi = {
+  create: (query: string, provider?: string, model?: string) =>
+    apiClient.request<ResearchCreateResponse>("POST", "/v1/research", {
+      query,
+      provider,
+      model,
+    }),
+
+  list: () => apiClient.request<ListEnvelope<ResearchJob>>("GET", "/v1/research"),
+
+  get: (id: string) => apiClient.request<ResearchJobDetail>("GET", `/v1/research/${id}`),
+
+  cancel: (id: string) =>
+    apiClient.request<{ message: string }>("POST", `/v1/research/${id}/cancel`),
+
+  // SSE: progress / done / error (JSON per `data:` line); snapshot-on-connect.
+  stream: (id: string, signal?: AbortSignal) =>
+    apiClient.streamEvents<ResearchEvent>("GET", `/v1/research/${id}/stream`, undefined, signal),
+};
+
+// ───────────── Cookbook / Hardware ─────────────
+export const hardwareApi = {
+  hardware: () => apiClient.request<HardwareInfo>("GET", "/v1/hardware"),
+
+  cookbook: (contextTokens: number) =>
+    apiClient.request<CookbookResponse>(
+      "GET",
+      `/v1/cookbook?context_tokens=${contextTokens}`
+    ),
 };

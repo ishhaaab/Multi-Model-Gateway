@@ -12,6 +12,9 @@ import ImagesPage from "@/pages/images";
 import PresetsPage from "@/pages/presets";
 import TemplatesPage from "@/pages/templates";
 import WorkflowsPage from "@/pages/workflows";
+import AgentPage from "@/pages/agent";
+import ResearchPage from "@/pages/research";
+import CookbookPage from "@/pages/cookbook";
 import SettingsPage from "@/pages/settings";
 import NotFoundPage from "@/pages/not-found";
 
@@ -42,6 +45,9 @@ export default function App() {
           <Route path="/presets" element={<PresetsPage />} />
           <Route path="/templates" element={<TemplatesPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
+          <Route path="/agent" element={<AgentPage />} />
+          <Route path="/research" element={<ResearchPage />} />
+          <Route path="/cookbook" element={<CookbookPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
 

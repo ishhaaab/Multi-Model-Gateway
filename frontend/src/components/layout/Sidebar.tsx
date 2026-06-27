@@ -5,6 +5,9 @@ import {
   MessageSquarePlus,
   ImagePlus,
   ImageIcon,
+  Bot,
+  Telescope,
+  Cpu,
   Settings,
   LogOut,
   MessagesSquare,
@@ -12,6 +15,7 @@ import {
   PanelLeftOpen,
 } from "lucide-react";
 import { useLayoutStore, SIDEBAR_MIN, SIDEBAR_MAX } from "@/stores/layout-store";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuthStore } from "@/stores/auth-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useImageStore } from "@/stores/image-store";
@@ -24,6 +28,13 @@ import { ImageHistoryList } from "@/components/images/ImageHistoryList";
 const MODES = [
   { to: "/chat", label: "Chat", icon: MessagesSquare },
   { to: "/images", label: "Image", icon: ImageIcon },
+];
+
+// Secondary destinations — agent + research + cookbook.
+const TOOLS = [
+  { to: "/agent", label: "Agent", icon: Bot },
+  { to: "/research", label: "Research", icon: Telescope },
+  { to: "/cookbook", label: "Cookbook", icon: Cpu },
 ];
 
 export function Sidebar() {
@@ -43,6 +54,7 @@ export function Sidebar() {
   const setSidebarWidth = useLayoutStore((s) => s.setSidebarWidth);
   const toggleSidebar = useLayoutStore((s) => s.toggleSidebar);
   const collapsed = useLayoutStore((s) => s.sidebarCollapsed);
+  const isMobile = useIsMobile();
   const asideRef = useRef<HTMLElement>(null);
 
   // Live-resize via direct style writes during drag; commit once on mouse-up.
@@ -82,8 +94,23 @@ export function Sidebar() {
     navigate("/login");
   };
 
-  // Collapsed → a slim icon rail that mirrors the expanded layout's vertical
-  // positions (new chat + mode toggle at top, settings/account in the footer).
+  // Mobile collapsed → a single floating button (no rail), so the chat gets
+  // the full width. Tapping it opens the panel as an overlay.
+  if (collapsed && isMobile) {
+    return (
+      <button
+        onClick={toggleSidebar}
+        title="Open menu"
+        aria-label="Open menu"
+        className="fixed left-3 top-3 z-40 flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-bg-secondary/80 text-text-secondary shadow-lg backdrop-blur transition-colors hover:bg-bg-tertiary hover:text-text-primary"
+      >
+        <PanelLeftOpen size={19} />
+      </button>
+    );
+  }
+
+  // Collapsed (desktop) → a slim icon rail that mirrors the expanded layout's
+  // vertical positions (new chat + mode toggle at top, settings/account footer).
   if (collapsed) {
     return (
       <aside className="flex h-full w-14 shrink-0 flex-col border-r border-border bg-bg-secondary/80">
@@ -110,6 +137,27 @@ export function Sidebar() {
         {/* mode toggle — Chat / Image */}
         <nav className="flex flex-col items-center gap-1 px-2 pb-2">
           {MODES.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              title={label}
+              className={({ isActive }) =>
+                cn(
+                  "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+                  isActive
+                    ? "bg-bg-tertiary text-accent-primary"
+                    : "text-text-secondary hover:bg-bg-tertiary/60 hover:text-text-primary"
+                )
+              }
+            >
+              <Icon size={18} />
+            </NavLink>
+          ))}
+        </nav>
+
+        {/* secondary nav — Agent / Research / Cookbook */}
+        <nav className="flex flex-col items-center gap-1 border-t border-border px-2 py-2">
+          {TOOLS.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -161,11 +209,24 @@ export function Sidebar() {
   }
 
   return (
-    <aside
-      ref={asideRef}
-      style={{ width: sidebarWidth }}
-      className="relative flex h-full shrink-0 flex-col border-r border-border bg-bg-secondary/80"
-    >
+    <>
+      {/* Mobile: dim + tap-to-close backdrop behind the overlaid panel. */}
+      {isMobile && (
+        <div
+          onClick={toggleSidebar}
+          aria-hidden
+          className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm"
+        />
+      )}
+      <aside
+        ref={asideRef}
+        style={{ width: isMobile ? "min(85vw, 320px)" : sidebarWidth }}
+        className={cn(
+          "flex h-full shrink-0 flex-col border-r border-border bg-bg-secondary/80",
+          // On mobile the panel floats over the content instead of squeezing it.
+          isMobile ? "fixed inset-y-0 left-0 z-40 shadow-2xl" : "relative"
+        )}
+      >
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 pt-5 pb-4">
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-bg-tertiary">
@@ -210,6 +271,31 @@ export function Sidebar() {
           ))}
         </div>
       </div>
+
+      {/* Secondary nav — Agent / Research / Cookbook */}
+      <nav className="flex flex-col gap-0.5 px-3 pb-3">
+        {TOOLS.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                isActive
+                  ? "bg-bg-tertiary text-text-primary"
+                  : "text-text-secondary hover:bg-bg-tertiary/60 hover:text-text-primary"
+              )
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <Icon size={16} className={isActive ? "text-accent-primary" : "text-text-muted"} />
+                {label}
+              </>
+            )}
+          </NavLink>
+        ))}
+      </nav>
 
       {/* New chat */}
       <div className="px-3 pb-3">
@@ -268,12 +354,15 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Drag-to-resize handle on the border shared with the main area */}
-      <div
-        onMouseDown={startResize}
-        className="absolute right-0 top-0 z-20 h-full w-1.5 cursor-col-resize transition-colors hover:bg-accent-primary/40 active:bg-accent-primary/60"
-        title="Drag to resize"
-      />
-    </aside>
+      {/* Drag-to-resize handle on the border shared with the main area (desktop only) */}
+      {!isMobile && (
+        <div
+          onMouseDown={startResize}
+          className="absolute right-0 top-0 z-20 h-full w-1.5 cursor-col-resize transition-colors hover:bg-accent-primary/40 active:bg-accent-primary/60"
+          title="Drag to resize"
+        />
+      )}
+      </aside>
+    </>
   );
 }

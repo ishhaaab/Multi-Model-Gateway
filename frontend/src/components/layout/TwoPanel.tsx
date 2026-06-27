@@ -12,7 +12,7 @@ interface TwoPanelProps {
 export function TwoPanel({ title, subtitle, headerExtra, list, detail }: TwoPanelProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex items-center justify-between gap-4 border-b border-border px-6 py-4">
+      <header className="flex items-center justify-between gap-4 border-b border-border px-6 py-4 max-md:pl-14">
         <div>
           <h1 className="text-2xl text-text-primary">{title}</h1>
           {subtitle && <p className="text-sm text-text-secondary">{subtitle}</p>}
