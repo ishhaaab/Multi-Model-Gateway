@@ -62,6 +62,42 @@ fallback. The contract additions the mobile app must handle:
   - Update the ported `types.ts` / `api-endpoints.ts` with the provider endpoints and
     `ChatRequest.provider_id`.
 
+### Training (image LoRA fine-tuning, backend Phase 6)
+
+The backend now lets users train image LoRAs from a zip of images and use the result on
+image generation. New endpoints:
+
+- `POST /v1/trainings` — multipart form: `name`, `base_model` (`flux-dev` | `sdxl`),
+  `dataset` (zip of 3+ images; optional `{image}.txt` captions ride along), `steps`
+  (default 1000), `learning_rate` (default 1e-4). Returns `{job_id, status: "queued"}`.
+- `GET /v1/trainings` — list this user's jobs (newest first, capped at 50).
+- `GET /v1/trainings/{id}` — detail; 404 for missing or foreign jobs.
+- `POST /v1/trainings/{id}/cancel` — sets a Redis flag the trainer checks between steps.
+- `GET /v1/trainings/{id}/stream` — SSE of `{"type":"progress"|"done"|"error"}` events on
+  channel `train:{id}`; `progress` carries `stage` + 0-100 `progress`; `done` carries
+  `artifact_filename` (and `sample_image` when complete).
+- `GET /v1/trainings/{id}/artifact` — downloads the trained `.safetensors`.
+
+**`TrainingJob` summary shape** (list items; detail adds `dataset_dir`, `params`,
+`sample_image`): `id`, `name`, `base_model`, `status` (`queued|running|complete|failed|cancelled`),
+`stage`, `progress`, `created_at`, `artifact_filename`, `sample_image`, `error`.
+
+**`ImageRequest`** now accepts `training_id` — uses a trained LoRA from a completed job
+(the backend injects a ComfyUI `LoraLoader` node). Requires `COMFY_LORA_DIR` (host folder)
++ `COMFY_LORA_CONTAINER_PATH` (container path the backend writes to) configured server-side;
+errors: 404 unknown/foreign job, 409 job not complete, 400 `COMFY_LORA_DIR` unset. The
+generate response gains `"lora"` (the filename ComfyUI loaded).
+
+- **Mobile implications:**
+  - Add a **"Train" screen**: upload an image zip (`expo-document-picker`), pick base
+    model + steps + learning rate, show a progress card driven by the SSE stream (stage +
+    progress bar), and a link to download/open the artifact when `done` arrives.
+  - Add a **trained-LoRA picker on the image generation screen**: `GET /v1/trainings`
+    filtered to `status == "complete"`, send the chosen job id as `training_id` on
+    generate; surface the 400/404/409 error strings verbatim.
+  - Port the new endpoints into `api-endpoints.ts` / `types.ts`; the SSE stream uses the
+    same `streamEvents` helper as research.
+
 ## Phases
 
 ### Phase 1 — Scaffold + contract layer + auth

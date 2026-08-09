@@ -263,3 +263,50 @@ Implemented:
 
 Not in this phase (later): routing against these providers in `services/router.py`, chat/
 agent wiring, per-provider param translation beyond what the adapters do.
+
+## Phase 6 — image LoRA training (in progress)
+
+Users can fine-tune image LoRAs from a zip of images and use the result on image
+generation, all through the API — no manual ai-toolkit runs.
+
+Implemented:
+
+- **`trainings` table** (`models/trainings.py`, migration `d4a8b2c6f9e7`) — user-owned rows
+  with name, `base_model` (`flux-dev | sdxl`), `dataset_dir` (inside the shared
+  `training_data` volume), `artifact_filename` (the produced `.safetensors`), status
+  (`queued|running|complete|failed|cancelled`), stage, 0-100 progress, JSONB params
+  (steps, learning_rate), error, `sample_image`. FK to users is `ON DELETE CASCADE`.
+- **Training CRUD + streaming** (`routers/trainings.py`, mounted at `/v1/trainings`) —
+  `POST /trainings` (multipart: name, base_model, dataset zip with a 2 GB cap, steps,
+  learning_rate; validates ≥3 images; safe flat zip extraction that rejects traversal
+  and `__MACOSX` junk), `GET /trainings` + `GET /trainings/{id}` (404 for missing AND
+  foreign rows — job ids can't be enumerated), `POST /trainings/{id}/cancel`, `GET
+  /trainings/{id}/stream` (SSE `{"type":"progress"|"done"|"error"}` relayed from Redis
+  pub/sub channel `train:{id}`), and `GET /trainings/{id}/artifact` (downloads the
+  `.safetensors`, traversal-guarded).
+- **Trainer arq worker** (`app/trainer_worker.py` + `services/trainer.py`) — a dedicated
+  compose service (`trainer`) built from the `trainer` Dockerfile target, which clones
+  ai-toolkit into `/opt/ai-toolkit` and runs `python /opt/ai-toolkit/run.py <config.yaml>`.
+  One GPU job at a time (`max_jobs = 1`), `TRAINING_JOB_TIMEOUT_SECONDS` wall-clock cap.
+  Progress is published to Redis pub/sub as the run progresses and the job row is updated
+  at each stage so polling works and state survives worker restarts.
+- **ai-toolkit specifics** — config uses the current `job: extension` shape with a
+  `config:` wrapper (older `job: train` flat shape is gone upstream); FLUX.1-dev is a
+  gated model so `HF_TOKEN` in `.env` is required for `base_model=flux-dev`; torch is
+  pinned to the repo's CUDA 13.0 build (`torch==2.13.0 … --index-url …/whl/cu130` in the
+  trainer Dockerfile); tqdm progress is parsed from `\r`-delimited chunks (a `\n`-only
+  reader would starve); captions are optional — ai-toolkit falls back to an empty caption
+  when `{image}.txt` is missing, so datasets may ride along their own `.txt` files.
+- **LoRA injection on generation** — `POST /v1/images/generate` now accepts
+  `training_id`. The handler copies the completed artifact into the ComfyUI LoRA folder
+  (`COMFY_LORA_DIR`, mounted into the backend container as `/comfy-loras`) as
+  `lora_{job.id}.safetensors`, then `services/comfy.py::inject_lora` splices a
+  `LoraLoader` node into the workflow between the checkpoint loader and the sampler /
+  CLIPTextEncode nodes. Injection is best-effort: a workflow that already has a
+  `LoraLoader`, or an unparseable KSampler link, is left unchanged (warning logged) so
+  generation never breaks. `COMFY_LORA_DIR` unset → 400; missing/foreign job → 404;
+  unfinished job → 409. The response gains a `"lora"` field naming the loaded file.
+
+Not in this phase (later): dataset management (delete/replace uploads), per-job trigger
+words / caption editing, hyperparameter tuning beyond steps + learning rate, and
+publishing trained LoRAs back to ComfyUI's own model browser.

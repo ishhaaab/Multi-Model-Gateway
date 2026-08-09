@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from app.routers import chat, models, auth, convo, presets, templates, images, workflows, agent, research, hardware, providers
+from app.routers import chat, models, auth, convo, presets, templates, images, workflows, agent, research, hardware, providers, trainings
 from app.middleware.ratelimit import RateLimitMiddleware
 from app.core.redis import get_redis, close_redis
 from app.core.config import settings
@@ -71,4 +71,5 @@ app.include_router(agent.router, prefix="/v1")
 app.include_router(research.router, prefix="/v1")
 app.include_router(hardware.router, prefix="/v1")
 app.include_router(providers.router, prefix="/v1")
+app.include_router(trainings.router, prefix="/v1")
  

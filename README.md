@@ -320,6 +320,52 @@ Example — an OpenAI-compatible endpoint (LM Studio, Ollama, Groq, ...):
 
 ---
 
+## Training LoRAs
+
+Fine-tune an image LoRA from a zip of images and use it on image generation — the gateway
+runs ai-toolkit in a dedicated GPU worker and injects the trained LoRA into ComfyUI
+workflows automatically.
+
+**Prerequisites:**
+
+- An NVIDIA GPU on the host (the `trainer` compose service needs `gpus: all`).
+- `HF_TOKEN` in `.env` if you train `flux-dev` (it's a gated model on Hugging Face; SDXL
+  trains without it).
+- `COMFY_LORA_DIR` in `.env` pointing at your ComfyUI `models/loras` folder — the backend
+  copies finished LoRAs there so ComfyUI can load them (when unset, image generation with a
+  `training_id` returns a 400).
+
+**The two LoRA folder variables:**
+
+- `COMFY_LORA_DIR` is the **host** path of your ComfyUI `models/loras` folder. docker-compose
+  bind-mounts it into the backend container — it never has to exist inside the container.
+- `COMFY_LORA_CONTAINER_PATH` is the **container** path the backend writes trained LoRAs to
+  (default `/comfy-loras`, which matches the compose mount target). In Docker you set
+  `COMFY_LORA_DIR` and leave the container path at its default. If you run the backend on the
+  host directly (no Docker), set **both** to the same real folder.
+
+**The flow:**
+
+1. **Upload a dataset** — `POST /v1/trainings` (multipart): `name`, `base_model`
+   (`flux-dev` or `sdxl`), `dataset` (a zip of **3+ images**; optional per-image
+   `{name}.txt` caption files ride along), plus `steps` and `learning_rate` if you want to
+   override the defaults (1000 / 1e-4).
+2. **Watch it train** — `GET /v1/trainings` lists your jobs; `GET /v1/trainings/{id}/stream`
+   streams SSE progress events (`{"type":"progress","stage","progress"}` then
+   `{"type":"done","artifact_filename"}`); `POST /v1/trainings/{id}/cancel` stops a run.
+3. **Download the artifact** — `GET /v1/trainings/{id}/artifact` returns the trained
+   `.safetensors`.
+4. **Use it on generation** — pass `training_id` on `POST /v1/images/generate`; the
+   gateway copies the LoRA into `COMFY_LORA_CONTAINER_PATH` (the bind-mounted folder) and
+   injects a ComfyUI `LoraLoader` node, so the result reflects your trained subject. The
+   response includes the loaded `lora` filename.
+
+Training jobs live in the `trainings` table (migration `d4a8b2c6f9e7`); artifacts are
+stored under the `training_data` volume. The worker does **not** hot-reload — restart the
+`trainer` service after changing training code.
+
+---
+
 ## Authentication Flow
 
 1. **Register** (`POST /auth/register`) -> Creates user, default preset, default SDXL template.

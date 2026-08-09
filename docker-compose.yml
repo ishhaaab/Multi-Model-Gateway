@@ -20,6 +20,10 @@ services:
       - "2727:8000"
     volumes:
       - ./backend:/app
+      - training_data:/app/training_data
+      # host ComfyUI models/loras folder (or a local default) so trained LoRAs
+      # written by the API land where ComfyUI can load them
+      - ${COMFY_LORA_DIR:-./comfy-loras}:/comfy-loras
     env_file:
       - .env
     secrets:
@@ -51,6 +55,26 @@ services:
     depends_on:
       - postgres
       - redis
+
+  # image-LoRA training worker (ai-toolkit); GPU required
+  trainer:
+    build:
+      context: ./backend
+      target: trainer
+    command: arq app.trainer_worker.WorkerSettings
+    volumes:
+      - ./backend:/app
+      - training_data:/app/training_data
+    env_file:
+      - .env
+    secrets:
+      - openrouter_api_key
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - postgres
+      - redis
+    gpus: all
 
   # optional self-hosted search for web_search + deep research:
   # start with `docker compose --profile search up` and set
@@ -95,6 +119,7 @@ services:
 volumes:
   pgdata:
   grafana-data:
+  training_data:
 
 
 secrets:

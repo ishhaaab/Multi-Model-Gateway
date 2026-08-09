@@ -7,6 +7,20 @@ class Settings(BaseSettings):
 
     COMFY_URL: str = "http://host.docker.internal:8188"   # ComfyUI server for image generation
 
+    # HOST path of your ComfyUI models/loras folder; used by docker-compose as
+    # the bind source mounted into the backend container at
+    # COMFY_LORA_CONTAINER_PATH. When unset, using a trained LoRA on image
+    # generation returns a 400 (the mount isn't configured).
+    COMFY_LORA_DIR: str = ""
+
+    # path INSIDE the container the backend writes trained LoRAs to; must match
+    # the compose mount target for ${COMFY_LORA_DIR}. When running the backend
+    # on the host directly, set both to the same real folder.
+    COMFY_LORA_CONTAINER_PATH: str = "/comfy-loras"
+
+    TRAINING_ROOT: str = "/app/training_data"   # shared volume for fine-tuning datasets + artifacts
+    TRAINING_JOB_TIMEOUT_SECONDS: int = 7200    # max wall-clock for one image-LoRA training run
+
     
     APP_HOST: str = "0.0.0.0"
     APP_PORT:int=8008
