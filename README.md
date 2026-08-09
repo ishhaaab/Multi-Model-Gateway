@@ -6,6 +6,30 @@ A self-hosted inference orchestration layer — a personal mini-OpenRouter that 
 
 ---
 
+## Quickstart (5 minutes)
+
+**Prereqs:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/Mac) or Docker Engine (Linux), and git. Optional — for local models — [LM Studio](https://lmstudio.ai/) (chat / prompt rewriting / embeddings) on port 1234, ComfyUI on 8188, and Ollama on 11434.
+
+1. **Clone and run the setup script** — it generates `.env` from `.env.example` (random secrets, your local model ids), checks Docker, and starts the stack:
+   ```bash
+   git clone https://github.com/ishaab/llm-gateway
+   cd llm-gateway
+   .\setup.ps1        # Windows PowerShell
+   # or
+   ./setup.sh         # Linux / macOS / WSL
+   ```
+   Already have a `.env`? The script detects it and leaves it unchanged.
+
+   The setup scripts accept two flags: `-SkipStart` / `--skip-start` prepares `.env` without starting Docker (`.\setup.ps1 -SkipStart`, `./setup.sh --skip-start`), and `-NonInteractive` / `--non-interactive` skips the prompts for CI/automation (`.\setup.ps1 -NonInteractive`, `./setup.sh --non-interactive`).
+2. **Open the API docs:** http://localhost:2727/docs (Swagger UI).
+3. **Register an account** (`POST /auth/register`).
+4. **Add your providers** — see [Adding providers](#adding-providers). A "Local (LM Studio)" provider row is seeded automatically when `LM_URL` is set.
+5. **Start chatting.**
+
+> From a phone over Tailscale, reach the app through Caddy on port 80 (e.g. `http://<tailscale-ip>`); keep port 2727 internal.
+
+---
+
 ## Architecture
 
 ![Architecture](arch-dia-4.png)
@@ -172,9 +196,9 @@ llm-gateway/
 
 **Prerequisites:**
 - Docker Desktop
-- LM Studio running with at least one model loaded on port 8008
-- Ollama running with `nomic-embed-text` pulled on port 11434
+- LM Studio running on port 1234 with at least one chat model loaded (chat + prompt rewriting), plus an embedding model matching `LM_EMBED_MODEL` (default `text-embedding-nomic-embed-text-v1.5`)
 - ComfyUI running on port 8188 (optional, for image generation)
+- Ollama on port 11434 (optional)
 
 **Setup:**
 
@@ -195,7 +219,7 @@ llm-gateway/
    - Health check: `http://localhost:2727/health`
    - API docs (Swagger UI): `http://localhost:2727/docs`
    - Prometheus: `http://localhost:9090`
-   - Grafana: `http://localhost:3000` (admin/admin)
+   - Grafana: `http://localhost:3000` (admin user `admin`, password from `GRAFANA_ADMIN_PASSWORD` in your generated `.env` — the setup script generates one if you don't set it)
 
 ---
 
@@ -206,8 +230,10 @@ llm-gateway/
 | `postgres` | `pgvector/pgvector:pg16` | internal | Persistent storage + pgvector extension |
 | `redis` | `redis:7-alpine` | internal | Rate limiting backend |
 | `backend` | Build from `./backend/Dockerfile` | `2727:8000` | FastAPI application |
+| `worker` | Build from `./backend/Dockerfile` | internal | arq deep-research job worker (same image as backend) |
+| `searxng` | `searxng/searxng` | internal | Optional self-hosted search for `web_search` + research (start with `--profile search`) |
 | `prometheus` | `prom/prometheus` | `9090:9090` | Metrics collection |
-| `grafana` | `grafana/grafana` | `3000:3000` | Dashboards (admin/admin) |
+| `grafana` | `grafana/grafana` | `3000:3000` | Dashboards (admin user `admin`; password = `GRAFANA_ADMIN_PASSWORD` in `.env`) |
 | `caddy` | `caddy:2` | `80:80` | Reverse proxy (strips `/api` prefix) |
 
 ---
@@ -227,20 +253,19 @@ Auto HTTPS is disabled. The frontend should call `/api/v1/*` and Caddy will forw
 
 | Variable | Required | Description |
 |---|---|---|
-| `LOCAL_URL` | Yes | Ollama base URL (default: `http://host.docker.internal:11434/v1`) |
-| `LOCAL_DEFAULT_MODEL` | Yes | Default local chat model |
-| `LM_URL` | Yes | LM Studio base URL (for prompt rewriting) |
+| `LM_URL` | Yes | LM Studio base URL (chat + prompt rewriting + embeddings) |
 | `LM_DEFAULT_MODEL` | Yes | LM Studio model for SDXL rewriting |
+| `COMFY_URL` | No | ComfyUI base URL for image generation (default: `http://host.docker.internal:8188`) |
 | `OPENROUTER_API_KEY` | No | OpenRouter API key |
 | `OPENROUTER_DEFAULT_MODEL` | No | Default OpenRouter model |
-| `GEMINI_API_KEY` | No | Google Gemini API key |
-| `GEMINI_MODEL` | No | Default Gemini model |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `POSTGRES_PASSWORD` | Yes | PostgreSQL password, required by docker-compose (and embedded in `DATABASE_URL`) |
 | `REDIS_URL` | Yes | Redis connection string |
 | `SECRET_KEY` | Yes | JWT signing secret |
 | `ALGORITHM` | Yes | JWT algorithm (`HS256`) |
 | `ACCESS_TOKEN_EXPIRY_MINUTES` | Yes | Access token TTL (60) |
 | `REFRESH_TOKEN_EXPIRY_DAYS` | Yes | Refresh token TTL (7) |
+| `GRAFANA_ADMIN_PASSWORD` | Yes | Grafana admin login password, required by docker-compose; the setup script generates one if you don't set it |
 | `LANGFUSE_PUBLIC_KEY` | No | Langfuse Cloud public key |
 | `LANGFUSE_SECRET_KEY` | No | Langfuse Cloud secret key |
 | `LANGFUSE_BASE_URL` | No | Langfuse endpoint |
@@ -260,6 +285,38 @@ The routing engine (`services/router.py`) decides where to send each request usi
 7. **Default** -> Route to local LM Studio
 
 The chat endpoint receives `provider`, `model`, `private` fields in the request body to control this behavior.
+
+---
+
+## Adding providers
+
+The gateway is bring-your-own-key: after registering, create provider rows via `POST /v1/providers` (or the /docs UI). Supported types:
+
+| `type` | Use for |
+|---|---|
+| `openai_compatible` | Any OpenAI-wire endpoint — LM Studio, Ollama, Groq, vLLM, OpenCode Go, ... |
+| `openai` | OpenAI cloud |
+| `anthropic` | Anthropic |
+| `google` | Google Gemini |
+| `openrouter` | OpenRouter |
+
+Keys are stored encrypted (Fernet) and are **write-only** — responses only ever show a masked suffix (`api_key_masked`). Each role (`local` / `cloud`) can have one default provider; a request can also pin a specific provider by passing its `provider_id` in the chat/agent body (overrides every routing heuristic).
+
+Example — an OpenAI-compatible endpoint (LM Studio, Ollama, Groq, ...):
+
+```json
+{
+  "name": "LM Studio",
+  "type": "openai_compatible",
+  "role": "local",
+  "base_url": "http://host.docker.internal:1234",
+  "api_key": "",
+  "default_model": "qwen2.5-7b-instruct",
+  "is_default": true
+}
+```
+
+`base_url` gets `/v1` appended automatically when it's missing (so `http://host:1234` and `http://host:1234/v1` both work). A "Local (LM Studio)" row is seeded for you when `LM_URL` is set, and an "OpenRouter" row only when an OpenRouter key is configured. If you never create rows, the gateway falls back to the legacy env-var configuration (`LM_URL`, `LM_CHAT_MODEL`, `OPENROUTER_API_KEY`, ...).
 
 ---
 

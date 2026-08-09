@@ -216,3 +216,6 @@ fallback. The contract additions the mobile app must handle:
 - **Android-first; iOS later** (same codebase; iOS build needs Apple Developer credentials).
 - **No automated tests** (the web app has none). Manual verification per the Verification
   section. If tests are later wanted: React Native Testing Library + Jest.
+- **Gateway operator onboarding is handled by `setup.ps1`/`setup.sh`** — they generate
+  `.env` and start the stack; the mobile app's first-launch onboarding remains a single
+  gateway-URL entry.
