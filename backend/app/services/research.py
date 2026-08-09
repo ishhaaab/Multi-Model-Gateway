@@ -20,11 +20,12 @@ import logging
 
 from sqlalchemy import select
 
-from app.core.config import settings, OPENROUTER_API_KEY
+from app.core.config import settings, get_openrouter_api_key
 from app.core.redis import get_redis
 from app.db import AsyncSessionLocal
 from app.models.research_jobs import ResearchJob
-from app.services.router import get_local_client, get_openrouter_client
+from app.services.provider_registry import get_default_provider, row_to_provider
+from app.services.providers import LLMProvider, OpenAICompatProvider, OpenRouterProvider
 from app.services.search import fetch_page, search
 
 logger = logging.getLogger(__name__)
@@ -51,18 +52,43 @@ class ResearchCancelled(Exception):
     pass
 
 
-def _pick_client(provider: str | None, model: str | None):
+async def _pick_provider(job, db) -> tuple[LLMProvider, str]:
     """Research favours the cloud model (long context, many sources) unless
-    the job pinned a provider."""
-    use_openrouter = (
-        provider == "openrouter"
-        or (provider in (None, "", "auto") and settings.OPENROUTER_DEFAULT_MODEL and OPENROUTER_API_KEY)
+    the job pinned a provider. User-configured rows win; with no rows we fall
+    back to the env-var clients. OpenRouter is only used when a key exists —
+    without one the fallback lands on local (never raises)."""
+    if job.provider == "openrouter":
+        role = "cloud"
+    elif job.provider == "local":
+        role = "local"
+    else:  # auto / None: cloud preferred when configured
+        role = "cloud" if settings.OPENROUTER_DEFAULT_MODEL else "local"
+
+    row = await get_default_provider(db, str(job.user_id), role)
+    if row is not None:
+        provider = row_to_provider(row)
+        if role == "local":
+            fallback_model = settings.LM_CHAT_MODEL or settings.LM_DEFAULT_MODEL
+        else:
+            fallback_model = settings.OPENROUTER_DEFAULT_MODEL
+        model = job.model if job.model and job.model != "auto" else (row.default_model or fallback_model)
+        return provider, model
+
+    # legacy env-var fallback: no configured rows for this role
+    if role == "cloud":
+        key = get_openrouter_api_key()
+        if key:
+            provider = OpenRouterProvider(api_key=key, default_model=settings.OPENROUTER_DEFAULT_MODEL)
+            model = job.model if job.model and job.model != "auto" else provider.default_model
+            return provider, model
+        # no key → fall through to local, do NOT raise
+    provider = OpenAICompatProvider(
+        base_url=settings.LM_URL,
+        api_key="LM-STUDIO",
+        default_model=settings.LM_CHAT_MODEL or settings.LM_DEFAULT_MODEL,
     )
-    if use_openrouter:
-        chosen = model if model and model != "auto" else settings.OPENROUTER_DEFAULT_MODEL
-        return get_openrouter_client(), chosen
-    chosen = model if model and model != "auto" else (settings.LM_CHAT_MODEL or settings.LM_DEFAULT_MODEL)
-    return get_local_client(), chosen
+    model = job.model if job.model and job.model != "auto" else provider.default_model
+    return provider, model
 
 
 async def _publish(redis, job_id: str, event: dict) -> None:
@@ -83,14 +109,12 @@ async def _set_stage(job, db, redis, stage: str, progress: int, message: str = "
     })
 
 
-async def _complete(client, model: str, system: str, user: str, temperature: float = 0.3) -> str:
-    response = await client.chat.completions.create(
-        model=model,
+async def _complete(provider, model: str, system: str, user: str, temperature: float = 0.3) -> str:
+    return await provider.complete(
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-        stream=False,
+        model=model,
         temperature=temperature,
     )
-    return response.choices[0].message.content or ""
 
 
 def _parse_queries(raw: str, fallback: str) -> list[str]:
@@ -110,13 +134,13 @@ def _parse_queries(raw: str, fallback: str) -> list[str]:
 
 
 async def _research(job, db, redis) -> tuple[str, list[dict]]:
-    client, model = _pick_client(job.provider, job.model)
+    provider, model = await _pick_provider(job, db)
     job_id = str(job.id)
 
     # 1. plan
     await _set_stage(job, db, redis, "planning", 5, "generating search queries")
     try:
-        raw_plan = await _complete(client, model, PLAN_PROMPT.format(
+        raw_plan = await _complete(provider, model, PLAN_PROMPT.format(
             max_queries=settings.RESEARCH_MAX_QUERIES), job.query)
         queries = _parse_queries(raw_plan, job.query)
     except Exception as e:
@@ -171,7 +195,7 @@ async def _research(job, db, redis) -> tuple[str, list[dict]]:
         f"[{s['n']}] {s['title']} — {s['url']}\n{s['content']}" for s in sources
     )
     answer = await _complete(
-        client, model, SYNTH_PROMPT.format(sources_block=sources_block), job.query,
+        provider, model, SYNTH_PROMPT.format(sources_block=sources_block), job.query,
     )
 
     # persist sources without page bodies (the answer carries the citations)

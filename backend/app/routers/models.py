@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from openai import AsyncOpenAI
 import httpx
-from app.core.config import settings, OPENROUTER_API_KEY
+from app.core.config import get_openrouter_api_key
 from app.core.security import get_current_user
 from app.services.router import get_local_client
 
@@ -21,10 +21,13 @@ async def list_local_models(user_id: str = Depends(get_current_user)):
 
 @router.get("/openrouter/models")
 async def list_openrouter_models(user_id: str = Depends(get_current_user)):
+    api_key = get_openrouter_api_key()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OpenRouter is not configured")
     async with httpx.AsyncClient() as client:
         response = await client.get(
             "https://openrouter.ai/api/v1/models",
-            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"}
+            headers={"Authorization": f"Bearer {api_key}"}
         )
         if response.status_code != 200:
             raise HTTPException(status_code=502, detail="Failed to fetch OpenRouter models")

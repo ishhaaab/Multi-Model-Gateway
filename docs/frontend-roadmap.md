@@ -22,6 +22,46 @@ frontend as the primary client. The web frontend stays as-is for reference/deskt
 - **Polish level: simple, clean, native.** Favor Expo built-in components, minimal custom
   animation, one dark theme.
 
+## Backend contract additions (from backend Phase 1 + 1b)
+
+The backend now supports **bring-your-own-key providers** — user-configured provider rows with
+encrypted keys, routed through the same chat/agent/research paths with a legacy env-var
+fallback. The contract additions the mobile app must handle:
+
+- **New endpoints (plain JSON CRUD, no SSE):**
+  - `GET /v1/providers` — list this user's providers (seeds the default env-based rows on
+    first visit if none exist).
+  - `POST /v1/providers` — create (name, type, role, base_url, api_key, default_model,
+    is_default, enabled).
+  - `PATCH /v1/providers/{id}` — update (api_key `null`/omitted = leave unchanged).
+  - `DELETE /v1/providers/{id}`.
+  - `POST /v1/providers/{id}/test` — one-token round-trip; returns `{ok, model}` or
+    `{ok: false, error}`.
+- **`ProviderOut` shape:** `id`, `name`, `type` (`openai_compatible|openai|anthropic|google|openrouter`),
+  `role` (`local|cloud`), `base_url`, `default_model`, `is_default`, `enabled`, `created_at`,
+  `api_key_masked`. Keys are **write-only** — responses never contain plaintext, only a masked
+  suffix.
+- **`ChatRequest`** (shared by `/v1/chat/completions` AND `/v1/agent/chat`) now accepts an
+  optional **`provider_id`** to pin a specific configured provider row (overrides all routing
+  heuristics).
+- **Routing** now prefers configured provider rows (per-role defaults), falling back to the
+  legacy env-var clients when no rows exist. Seeding is **idempotent**: missing rows are
+  created on registration and again on the first providers page visit (existing rows are never
+  touched). A "Local (LM Studio)" row is seeded when `LM_URL` is configured; an "OpenRouter"
+  row is seeded **only** when an OpenRouter API key is configured (no key => no OpenRouter row).
+- **OpenAI-compatible `base_url` normalization:** the adapter automatically appends `/v1` when
+  the URL doesn't already contain it (e.g. `http://host:1234` becomes `http://host:1234/v1`),
+  so user-entered and seeded URLs work without a manual `/v1` suffix.
+- **Anthropic + Google adapters** exist for plain chat but do **not** support tool calling yet
+  (agent mode is limited to OpenAI-wire providers: openai_compatible / openai / openrouter).
+- **Mobile/web implications:**
+  - Add a **"Providers" settings screen** (list/add/edit/delete + test button; fields above;
+    masked key display; key input write-only).
+  - Optionally a **provider picker in the chat composer** that sends `provider_id` alongside
+    the existing preset/mode controls.
+  - Update the ported `types.ts` / `api-endpoints.ts` with the provider endpoints and
+    `ChatRequest.provider_id`.
+
 ## Phases
 
 ### Phase 1 — Scaffold + contract layer + auth
@@ -163,6 +203,8 @@ frontend as the primary client. The web frontend stays as-is for reference/deskt
   `@microsoft/fetch-event-source` + ReadableStream polyfill if it breaks on the target RN
   version. Test it first in Phase 1 with a simple chat send.
 - **The web frontend is NOT deleted** — stays as the desktop/reference client.
+- **Provider API is plain JSON CRUD — no SSE.** The provider list/create/update/delete/test
+  endpoints use ordinary `apiClient.request()` calls; only chat/agent/research stream.
 - **Agent + Research results are ephemeral** in the UI (not persisted to the conversation),
   matching the web app. If persistence is later wanted, that requires a backend change
   (write research answer as a `Message`) — out of scope here.

@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str
 
+    # Optional explicit Fernet key (32 urlsafe base64 bytes) for encrypting
+    # user-provided provider API keys at rest. Empty => derived from SECRET_KEY
+    # via sha256 so existing deployments don't need a new env var.
+    KEY_ENCRYPTION_KEY: str = ""
+
     ACCESS_TOKEN_EXPIRY_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRY_DAYS: int= 7
 
@@ -96,4 +101,19 @@ def get_secret(name: str) -> str:
         return env_value
     raise RuntimeError(f"Secret '{name}' not found at {path} or in ${name.upper()}")
 
-OPENROUTER_API_KEY = get_secret("openrouter_api_key")
+
+def get_secret_or_none(name: str) -> str | None:
+    """Like get_secret() but returns None instead of raising when the secret
+    is absent — for optional secrets the app must boot without."""
+    path = f"/run/secrets/{name}"
+    if os.path.exists(path):
+        with open(path) as f:
+            return f.read().strip()
+    env_value = os.environ.get(name.upper())
+    return env_value if env_value else None
+
+
+def get_openrouter_api_key() -> str | None:
+    """OpenRouter key if configured, else None. Optional (roadmap S1): the app
+    must boot without it; callers decide how to degrade."""
+    return get_secret_or_none("openrouter_api_key")

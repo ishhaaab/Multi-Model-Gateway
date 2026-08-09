@@ -100,16 +100,14 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
         tools_by_name = {t.name: t for t in allowed}
         tool_schemas = [registry.openai_schema(t) for t in allowed]
 
-        client, model = await get_provider(request)
-        is_cloud = "openrouter" in str(client.base_url).lower()
+        provider, model, role = await get_provider(request, user_id, db)
+        is_cloud = provider.is_cloud
         resolved_provider = "openrouter" if is_cloud else "local"  # CR-6: resolved, not "auto"
         # mirror the chat path: LM Studio takes extra sampling params via extra_body
-        extra_params = {} if is_cloud else {
-            "extra_body": {
-                "top_k": preset.top_k if (preset and preset.top_k is not None) else DEFAULT_TOP_K,
-                "min_p": preset.min_p if preset else DEFAULT_MIN_P,
-                "repeat_penalty": preset.repeat_penalty if preset and preset.repeat_penalty and preset.repeat_penalty > 0 else DEFAULT_REPEAT_PENALTY,
-            }
+        extra_sampling = {} if is_cloud else {
+            "top_k": preset.top_k if (preset and preset.top_k is not None) else DEFAULT_TOP_K,
+            "min_p": preset.min_p if preset else DEFAULT_MIN_P,
+            "repeat_penalty": preset.repeat_penalty if preset and preset.repeat_penalty and preset.repeat_penalty > 0 else DEFAULT_REPEAT_PENALTY,
         }
 
         start_time = time.time()
@@ -123,27 +121,30 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
             over_budget = (prompt_tok + completion_tok) > settings.AGENT_TOKEN_BUDGET
             offer_tools = bool(tool_schemas) and not over_budget and iteration < settings.AGENT_MAX_ITERATIONS
 
-            kwargs = dict(
-                model=model,
-                messages=messages,
-                stream=False,
-                temperature=preset.temperature if preset else DEFAULT_TEMPERATURE,
-                **extra_params,
-            )
             if offer_tools:
-                kwargs["tools"] = tool_schemas
-                kwargs["tool_choice"] = "auto"
-
-            response = await client.chat.completions.create(**kwargs)
-
-            if response.usage:
-                prompt_tok += response.usage.prompt_tokens or 0
-                completion_tok += response.usage.completion_tokens or 0
-
-            msg = response.choices[0].message
-            tool_calls = msg.tool_calls or []
-            if not tool_calls or not offer_tools:
-                final_answer = msg.content or ""
+                resp = await provider.chat_with_tools(
+                    messages=messages,
+                    model=model,
+                    temperature=preset.temperature if preset else DEFAULT_TEMPERATURE,
+                    tools=tool_schemas,
+                    tool_choice="auto",
+                    max_tokens=None,
+                    extra_sampling=extra_sampling if not is_cloud else None,
+                )
+                if resp.prompt_tokens is not None:
+                    prompt_tok += resp.prompt_tokens
+                    completion_tok += resp.completion_tokens or 0
+                tool_calls = resp.tool_calls or []
+                if not tool_calls:
+                    final_answer = resp.content or ""
+                    break
+            else:
+                final_answer = await provider.complete(
+                    messages=messages,
+                    model=model,
+                    temperature=preset.temperature if preset else DEFAULT_TEMPERATURE,
+                    max_tokens=None,
+                )
                 # tools were withheld due to the iteration cap / token budget (not because
                 # the model finished) → the answer may be incomplete (issues.md CR-8)
                 truncated = bool(tool_schemas) and not offer_tools
@@ -151,28 +152,28 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
 
             messages.append({
                 "role": "assistant",
-                "content": msg.content,
+                "content": resp.content,
                 "tool_calls": [
                     {
                         "id": tc.id,
                         "type": "function",
-                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                        "function": {"name": tc.name, "arguments": tc.arguments},
                     }
                     for tc in tool_calls
                 ],
             })
 
             for tc in tool_calls:
-                name = tc.function.name
+                name = tc.name
                 yield _sse({"type": "tool_call", "id": tc.id, "name": name,
-                            "arguments": tc.function.arguments})
+                            "arguments": tc.arguments})
 
                 tool = tools_by_name.get(name)
                 if tool is None:
                     # not registered, or registered but not permitted for this user
                     result = f"Error: unknown or unauthorised tool '{name}'"
                 else:
-                    result = await _execute_tool(tool, tc.function.arguments, ctx)
+                    result = await _execute_tool(tool, tc.arguments, ctx)
 
                 yield _sse({"type": "tool_result", "id": tc.id, "name": name, "content": result})
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
@@ -199,6 +200,12 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
         # raised inside the stream, after headers are sent, so the global
         # handler can't translate it so surface it as an SSE error event
         yield _sse({"type": "error", "message": e.detail})
+        yield _sse({"type": "done", "conversation_id": conversation_id})
+    except RuntimeError as e:
+        # e.g. chat_with_tools on a provider that doesn't support tool calling
+        # yet (Anthropic/Google) — surface the real message, not a generic 500
+        logger.error("Tool-calling error in agent run: %s", repr(e))
+        yield _sse({"type": "error", "message": str(e)})
         yield _sse({"type": "done", "conversation_id": conversation_id})
     except Exception as e:
         logger.error("Unexpected error in agent run: %s", repr(e))

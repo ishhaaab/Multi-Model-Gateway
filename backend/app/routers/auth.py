@@ -1,4 +1,5 @@
 import re
+import logging
 
 from jose import jwt
 from datetime import datetime, timedelta
@@ -21,7 +22,10 @@ from app.models.refresh_tokens import RefreshToken
 from app.models.presets import Preset, DEFAULT_TEMPERATURE, DEFAULT_CONTEXT_OVERFLOW
 from app.models.templates import PromptTemplate
 from app.services.template import DEFAULT_STRUCTURE
+from app.services.provider_registry import seed_default_providers
 import uuid
+
+logger = logging.getLogger(__name__)
 
 _EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
@@ -92,6 +96,14 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=400, detail="user already exists")
+
+    # seed the backward-compat provider rows (Local + OpenRouter, when a key is
+    # configured) so a fresh account can chat immediately. Seeding must never
+    # fail registration, so any error is logged and swallowed.
+    try:
+        await seed_default_providers(db, str(new_user.id))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("provider seeding failed for new user %s: %r", new_user.id, e)
 
     return {"message": "user created successfully"}
     

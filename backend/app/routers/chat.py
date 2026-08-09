@@ -12,10 +12,11 @@ from app.db import get_db, AsyncSessionLocal
 from app.core.security import get_current_user
 from app.core.metrics import record_metrics
 from app.core.background import spawn
+from app.core.exceptions import AppError
 
 from app.services.convo import conversation, load_history, save_messages, get_last_exchanges, detect_recall_request
 from app.services.memory import store_exchange_memories
-from app.services.router import get_provider, ChatRequest, Provider
+from app.services.router import get_provider, ChatRequest
 
 from app.models.presets import (
     Preset,
@@ -76,8 +77,16 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
     if system_prefix:
         messages = system_prefix + messages
 
-    client, model = await get_provider(request)
-    is_cloud = "openrouter" in str(client.base_url).lower()
+    try:
+        provider, model, role = await get_provider(request, user_id, db)
+    except AppError as exc:
+        # headers are already sent at this point, so the global AppError handler
+        # can't translate the error — surface it as an SSE [ERROR] event instead
+        logger.error("Provider resolution failed: %s", exc.detail)
+        yield f"data: [ERROR] {exc.detail}\n\n"
+        yield "data: [DONE]\n\n"
+        return
+    is_cloud = provider.is_cloud
     resolved_provider = "openrouter" if is_cloud else "local"  # CR-6: log the resolved provider, not "auto"
 
     # Release the DB connection back to the pool BEFORE the (up-to-minute) stream —
@@ -92,56 +101,47 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
     full_response = ""
 
 
-    if is_cloud:
-        # Cloud providers report accurate usage in the final stream chunk.
-        extra_params = {"stream_options": {"include_usage": True}}
-    else:
-        # LM Studio has sampling params via extra_body. gang we do NOT send
-        # stream_options as some LM Studio builds stop streaming token by token
-        # when it's present (usage then falls back to the streamed chunk count).
-        extra_params = {
-            "extra_body": {
-                "top_k": preset.top_k if (preset and preset.top_k is not None) else DEFAULT_TOP_K,
-                "min_p": preset.min_p if preset else DEFAULT_MIN_P,
-                "repeat_penalty": preset.repeat_penalty if preset and preset.repeat_penalty and preset.repeat_penalty > 0 else DEFAULT_REPEAT_PENALTY
-            }
+    # LM Studio has sampling params via extra_body; cloud providers reject them.
+    extra_sampling = {}
+    if not is_cloud:
+        # we do NOT send stream_options as some LM Studio builds stop streaming
+        # token by token when it's present (usage then falls back to the
+        # streamed chunk count, handled inside the adapter).
+        extra_sampling = {
+            "top_k": preset.top_k if (preset and preset.top_k is not None) else DEFAULT_TOP_K,
+            "min_p": preset.min_p if preset else DEFAULT_MIN_P,
+            "repeat_penalty": preset.repeat_penalty if preset and preset.repeat_penalty and preset.repeat_penalty > 0 else DEFAULT_REPEAT_PENALTY
         }
 
+    prompt_tok = 0
+    completion_tok = 0
+    stream_error = False
     try:
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            stream=True,
-            temperature=preset.temperature if preset else DEFAULT_TEMPERATURE,
+        async for chunk in provider.stream_chat(
+            messages, model=model, temperature=preset.temperature if preset else DEFAULT_TEMPERATURE,
             max_tokens=preset.token_limit if preset and preset.token_limit and preset.token_limit > 0 else None,
             stop=preset.stop_strings if preset else None,
             top_p=preset.top_p if preset else None,
-            **extra_params
-        )
-    except APIError as e:
-        logger.error("Provider API error: %s", repr(e))
-        yield "data: [ERROR] upstream model provider error\n\n"
-        yield "data: [DONE]\n\n"
-        return
-    except Exception as e:
-        logger.error("Unexpected error during completion: %s", repr(e))
-        yield "data: [ERROR] internal server error\n\n"
-        yield "data: [DONE]\n\n"
-        return
-
-    usage = None
-    stream_error = False
-    try:
-        async for chunk in response:
-            if getattr(chunk, "usage", None):
-                usage = chunk.usage          # final usage-only chunk (include_usage)
-            if not chunk.choices:
-                continue
-            content = chunk.choices[0].delta.content
-            if content:
-                full_response += content
+            extra_sampling=extra_sampling,
+        ):
+            if chunk.prompt_tokens is not None:
+                prompt_tok = chunk.prompt_tokens
+                completion_tok = chunk.completion_tokens or 0
+            if chunk.content:
+                full_response += chunk.content
                 token_count += 1
-                yield f"data: {content}\n\n"
+                yield f"data: {chunk.content}\n\n"
+    except APIError as e:
+        # the OpenAI SDK raises APIError on iteration, not on create — so this
+        # is always a MID-stream failure and some tokens may already have been
+        # streamed. Do NOT return: keep the partial exchange (revision.md
+        # contract: partial responses ARE saved) and fall through to the save
+        # block + the standard [ERROR] stream interrupted tail below. An
+        # APIError on the very first chunk (the create-call failure) lands here
+        # too and simply saves nothing, which save_messages handles via the
+        # `if full_response or not stream_error` guard.
+        logger.error("Provider API error: %s", repr(e))
+        stream_error = True
     except Exception as e:
         # provider died mid gen: keep whatever streamed so far so the
         # exchange isn't lost, and end the stream cleanly instead of crashing
@@ -152,11 +152,7 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
     elapsed = time.time() - start_time
 
     # Prefer the provider's reported token usage; fall back to the streamed count.
-    if usage is not None:
-        prompt_tok = usage.prompt_tokens or 0
-        completion_tok = usage.completion_tokens or 0
-    else:
-        prompt_tok = 0
+    if prompt_tok == 0 and completion_tok == 0:
         completion_tok = token_count
 
     # on a mid-stream failure with nothing generated there is no exchange to save

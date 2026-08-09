@@ -222,3 +222,44 @@ CR-17/18/19/20/21/22/23.
   call.
 - **S3 changes frontend image rendering** (rewrite to `/api/v1/images/file`). Backend fix is in
   scope here; the frontend change is noted in the frontend roadmap.
+
+## Phase 5 — BYO-key providers (in progress)
+
+Users can now register their own model providers (their own API keys) instead of being
+hard-wired to the env-configured LM Studio / OpenRouter pair. The routing engine
+(`services/router.py`) and chat wiring are untouched in this phase — the provider
+configuration surface and adapters are built and ready for a later phase to consume.
+
+Implemented:
+
+- **`providers` table** (`models/providers.py`, migration `b8e4f1a2c9d3`) — user-owned rows with
+  name, type (`openai_compatible | openai | anthropic | google | openrouter`), role
+  (`local | cloud`), optional base_url, `api_key_encrypted` (Fernet, never plaintext),
+  `default_model`, `is_default`, `enabled`, `created_at`, and a unique `(user_id, name)`.
+  FK to users is `ON DELETE CASCADE`.
+- **Encrypted key storage** (`core/crypto.py`) — Fernet; key comes from `KEY_ENCRYPTION_KEY`
+  (32 urlsafe base64 bytes) when set, else derived from `SECRET_KEY` via SHA-256 so existing
+  deployments need no new env var. `encrypt_secret`/`decrypt_secret`; empty input and
+  `InvalidToken` (rotated keys) raise `ValueError`. No plaintext keys are ever logged.
+- **Adapter protocol** (`services/providers/`) — `LLMProvider` base with
+  `stream_chat` (async iterator of `StreamChunk`) and `complete` (non-streamed). Concrete
+  adapters: `openai_compat` (LM Studio/Ollama/Groq-style endpoints; `extra_body` for non-spec
+  sampling, no `stream_options` to preserve LM Studio behavior), `openai`, `openrouter`
+  (`stream_options={"include_usage": True}`, reads the final usage chunk), `anthropic` and
+  `google` (SDKs lazy-imported; unavailable adapters raise `RuntimeError` on use).
+- **Provider registry** (`services/provider_registry.py`) — `row_to_provider` (decrypts the
+  key, dispatches to the right adapter), `list_providers`, `get_default_provider` (default
+  flag first, else oldest enabled), `resolve_provider` (by id with 404/403 ownership checks,
+  or by role default; 503 `NoProviderError` when a role has nothing configured),
+  `test_provider` (one-token round-trip), `mask_key`.
+- **CRUD router** (`routers/providers.py`, mounted at `/v1/providers`) — GET (seeds
+  backward-compat rows first, then lists with `api_key_masked`), POST/PATCH (encrypts keys,
+  keeps exactly one `is_default` per role), DELETE, and POST `/{id}/test`.
+- **Backward-compat seeding** — `seed_default_providers` creates "Local (LM Studio)" from
+  `LM_URL`/`LM_CHAT_MODEL` and "OpenRouter" from the (optional, S1) OpenRouter key on first
+  list, so existing env-var behavior is preserved and keys migrate into the encrypted store.
+- `KEY_ENCRYPTION_KEY` added to `core/config.py`; `cryptography` added to requirements
+  (previously only transitive). `alembic/env.py` and `worker.py` import the new model.
+
+Not in this phase (later): routing against these providers in `services/router.py`, chat/
+agent wiring, per-provider param translation beyond what the adapters do.

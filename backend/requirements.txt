@@ -10,6 +10,7 @@ asyncpg
 alembic
 pgvector
 python-jose[cryptography]
+cryptography
 passlib[bcrypt]
 bcrypt==4.0.1
 python-multipart
