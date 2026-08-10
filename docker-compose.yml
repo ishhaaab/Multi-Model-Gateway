@@ -65,6 +65,8 @@ services:
     volumes:
       - ./backend:/app
       - training_data:/app/training_data
+      # HF download cache (safety checker etc.) persists across container recreates
+      - hf_cache:/root/.cache/huggingface
       # SDXL_MODEL_PATH is the host folder holding your local SDXL model for
       # training; the trainer looks for SDXL_MODEL_NAME inside it (or uses
       # /models/sdxl directly when SDXL_MODEL_NAME is empty). Unset var defaults
@@ -130,6 +132,7 @@ volumes:
   pgdata:
   grafana-data:
   training_data:
+  hf_cache:
 
 
 secrets:
