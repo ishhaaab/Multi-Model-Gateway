@@ -272,7 +272,7 @@ generation, all through the API — no manual ai-toolkit runs.
 Implemented:
 
 - **`trainings` table** (`models/trainings.py`, migration `d4a8b2c6f9e7`) — user-owned rows
-  with name, `base_model` (`flux-dev | sdxl`), `dataset_dir` (inside the shared
+  with name, `base_model` (`flux-dev | sdxl | sd1`), `dataset_dir` (inside the shared
   `training_data` volume), `artifact_filename` (the produced `.safetensors`), status
   (`queued|running|complete|failed|cancelled`), stage, 0-100 progress, JSONB params
   (steps, learning_rate), error, `sample_image`. FK to users is `ON DELETE CASCADE`.
@@ -297,6 +297,15 @@ Implemented:
   trainer Dockerfile); tqdm progress is parsed from `\r`-delimited chunks (a `\n`-only
   reader would starve); captions are optional — ai-toolkit falls back to an empty caption
   when `{image}.txt` is missing, so datasets may ride along their own `.txt` files.
+- **base_model extension pattern** — `base_model` supports `flux-dev | sdxl | sd1`. The
+  sd1/sdxl branches point `name_or_path` at local checkpoints mounted from
+  `SD1_MODEL_PATH`/`SDXL_MODEL_PATH` (see `core/config.py`) instead of downloading the HF
+  default; sd1 leaves `is_xl: false` so ai-toolkit uses its default sd1 arch. 6GB-VRAM
+  tuning for sd1/sdxl: `cache_latents_to_disk`, `ema_config.use_ema: false`, batch 1,
+  grad accum 1, gradient checkpointing, frozen TE, 512px. Adding another family = add it
+  to the `base_model` Literal in `routers/trainings.py` + a `_build_config` branch in
+  `services/trainer.py` + `*_MODEL_PATH`/`*_MODEL_NAME` settings + a compose mount
+  (documented in the `trainer.py` module docstring).
 - **LoRA injection on generation** — `POST /v1/images/generate` now accepts
   `training_id`. The handler copies the completed artifact into the ComfyUI LoRA folder
   (`COMFY_LORA_DIR`, mounted into the backend container as `/comfy-loras`) as

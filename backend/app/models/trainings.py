@@ -7,7 +7,7 @@ import uuid, datetime
 TRAINING_STATUSES = {"queued", "running", "complete", "failed", "cancelled"}
 TRAINING_STAGES = {"queued", "preparing", "training", "saving", "done"}
 # supported base models for fine-tuning
-TRAINING_BASE_MODELS = {"flux-dev", "sdxl"}
+TRAINING_BASE_MODELS = {"flux-dev", "sdxl", "sd1"}
 
 
 class TrainingJob(Base):
@@ -23,7 +23,7 @@ class TrainingJob(Base):
     id = Column(UUID, primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String(128), nullable=False)
-    base_model = Column(String(32), nullable=False)   # "flux-dev" | "sdxl"
+    base_model = Column(String(32), nullable=False)   # "flux-dev" | "sdxl" | "sd1"
     dataset_dir = Column(String(512), nullable=True)  # path inside the training_data volume
     artifact_filename = Column(String(512), nullable=True)  # produced .safetensors basename
     status = Column(String(16), nullable=False, default="queued")  # queued|running|complete|failed|cancelled

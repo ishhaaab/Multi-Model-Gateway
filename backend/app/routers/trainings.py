@@ -83,10 +83,18 @@ async def _get_owned_job(job_id: str, user_id: str, db: AsyncSession) -> Trainin
 @router.post("/trainings")
 async def create_training(
     name: str = Form(min_length=1),
-    base_model: Literal["flux-dev", "sdxl"] = Form(...),
+    # base_model selects the model family to train a LoRA against. Adding a
+    # new model type = add it to this Literal AND add a matching branch in
+    # backend/app/services/trainer.py _build_config (model name_or_path /
+    # local-path settings, is_flux/is_xl flags, sample params).
+    base_model: Literal["flux-dev", "sdxl", "sd1"] = Form(...),
     dataset: UploadFile = File(...),
     steps: int = Form(default=1000, ge=100, le=20000),
     learning_rate: float = Form(default=1e-4, gt=0),
+    # training resolution (width=height). Lower values (e.g. 512) fit small
+    # GPUs; FLUX is capped at 1024 by the trainer regardless of this value.
+    # When omitted, the family default applies: 512 for sd1, 1024 otherwise.
+    resolution: int | None = Form(default=None, ge=256, le=2048),
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
@@ -153,6 +161,11 @@ async def create_training(
                 detail=f"dataset must contain at least 3 image files (.jpg, .jpeg, .png, .webp); found {image_count}",
             )
 
+        # sd1 is natively 512px, so it defaults to 512 when the caller does
+        # not pick a resolution; every other family defaults to 1024. Always
+        # store an int so _build_config sees a concrete value.
+        res = resolution if resolution is not None else (512 if base_model == "sd1" else 1024)
+
         job = TrainingJob(
             id=job_id,
             user_id=user_id,
@@ -162,7 +175,7 @@ async def create_training(
             status="queued",
             stage="queued",
             progress=0,
-            params={"steps": steps, "learning_rate": learning_rate},
+            params={"steps": steps, "learning_rate": learning_rate, "resolution": res},
         )
         db.add(job)
         await db.commit()

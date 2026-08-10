@@ -65,6 +65,16 @@ services:
     volumes:
       - ./backend:/app
       - training_data:/app/training_data
+      # SDXL_MODEL_PATH is the host folder holding your local SDXL model for
+      # training; the trainer looks for SDXL_MODEL_NAME inside it (or uses
+      # /models/sdxl directly when SDXL_MODEL_NAME is empty). Unset var defaults
+      # to ./comfy-checkpoints — an empty dir Docker will create (gitignored).
+      - ${SDXL_MODEL_PATH:-./comfy-checkpoints}:/models/sdxl
+      # SD1_MODEL_PATH is the host folder holding your local SD1 model for
+      # training; the trainer looks for SD1_MODEL_NAME inside it (or uses
+      # /models/sd1 directly when SD1_MODEL_NAME is empty). Unset var defaults
+      # to ./comfy-checkpoints — an empty dir Docker will create (gitignored).
+      - ${SD1_MODEL_PATH:-./comfy-checkpoints}:/models/sd1
     env_file:
       - .env
     secrets:

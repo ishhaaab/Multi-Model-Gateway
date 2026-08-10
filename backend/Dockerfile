@@ -34,7 +34,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 #   torch 2.13.0, torchvision 0.28.0, torchaudio 2.11.0
 # All three ship cp311 wheels on the cu130 index, so the python:3.11-slim base
 # resolves them directly.
+#
+# ai-toolkit is pinned to the exact commit the first trainer image was built
+# from (verified via `git rev-parse HEAD` in the running image):
+#   5ff8a0435ab136cc2f1f28446945ad4d0f8d6c1c  (2026-08-09, "Make v1 the default
+#   training adapter"). No tag exists at/near this commit, so the SHA is the
+#   pin. Note: the shallow clone only contains this commit while it is the
+#   repo's default-branch HEAD; once upstream moves past it the checkout below
+#   fails loudly at build time rather than silently building a newer revision.
 RUN git clone --depth 1 https://github.com/ostris/ai-toolkit /opt/ai-toolkit \
+    && git -C /opt/ai-toolkit checkout 5ff8a0435ab136cc2f1f28446945ad4d0f8d6c1c \
     && pip install --no-cache-dir torch==2.13.0 torchvision==0.28.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cu130 \
     && pip install --no-cache-dir -r /opt/ai-toolkit/requirements.txt
+# ai-toolkit requires opencv-python (non-headless), which needs system GL libs
+# missing from python:3.11-slim — without libgl1/libglib2.0-0 the worker crashes
+# on `import cv2` with "libGL.so.1: cannot open shared object file".
+RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
 CMD ["arq", "app.trainer_worker.WorkerSettings"]

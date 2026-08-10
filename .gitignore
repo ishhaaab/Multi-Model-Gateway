@@ -12,3 +12,4 @@ node_modules/
 secrets/
 frontend/.env.production
 *.png
+comfy-checkpoints/

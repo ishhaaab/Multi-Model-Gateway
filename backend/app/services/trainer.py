@@ -18,6 +18,52 @@ Events:
 
 Cancellation: the cancel endpoint sets Redis key "train:cancel:{job_id}";
 the worker checks it between output chunks and aborts cleanly.
+
+Local SDXL models: the trainer compose service bind-mounts the host folder
+${SDXL_MODEL_PATH} (default ./comfy-checkpoints) at /models/sdxl. When
+SDXL_MODEL_PATH is set in .env, SDXL jobs point name_or_path at the local
+folder (or a single-file checkpoint inside it when SDXL_MODEL_NAME is given)
+instead of downloading the ~7GB Hugging Face model. Verified against the
+ai-toolkit source in /opt/ai-toolkit: a single-file .safetensors IS loadable
+directly — toolkit/stable_diffusion_model.py load_model() calls
+StableDiffusionXLPipeline.from_single_file() whenever name_or_path exists on
+disk and is NOT a directory (else it falls back to from_pretrained() for HF
+ids / diffusers folders). No conversion step is needed. Note the model block
+MUST set is_xl: true for SDXL or ai-toolkit treats the checkpoint as sd1 and
+loads it with the wrong pipeline class.
+
+Local SD1 models: the same pattern covers stable-diffusion-1.x —
+${SD1_MODEL_PATH} (default ./comfy-checkpoints) is bind-mounted at
+/models/sd1, and SD1 jobs point name_or_path there (optionally at
+SD1_MODEL_NAME inside it) instead of downloading the ~4GB Hugging Face
+model. SD1 must NOT set is_xl (and never is_flux) — ai-toolkit's ModelConfig
+then infers the default 'sd1' arch and loads with
+StableDiffusionPipeline.from_single_file(), the correct pipeline class for
+SD1 checkpoints. SD1 is natively 512px, so the job resolution defaults to
+512 and is capped at 1024.
+
+6GB-VRAM tuning (sd1/sdxl) — verified against the installed ai-toolkit in
+/opt/ai-toolkit: ``cache_latents_to_disk`` is a real dataset option
+(toolkit/config_modules.py:1001; latents precomputed once and spilled to
+disk instead of held in VRAM), ``ema_config.use_ema: false`` cleanly disables
+EMA (toolkit/config_modules.py:545-549, EMAConfig at :827; no fp32 shadow
+weights), and the ``low_vram`` model flag exists (config_modules.py:689) but
+is a NO-OP for sd1/sdxl in this version — it is only consulted on the
+FLUX/SD3/Wan transformer-quantization paths (stable_diffusion_model.py
+:401/:665/:723, models/wan21/wan21.py, models/wan21/wan21_i2v.py,
+util/quantize.py:416) so it is NOT set here. Combined with
+batch_size 1, gradient_accumulation_steps 1, gradient_checkpointing, a
+frozen text encoder and 512px resolution, an RTX 3060 Laptop (6GB) runs
+~0.3-1s/step.
+
+Adding a new base model type (extension point): (a) add the name to the
+base_model Literal in routers/trainings.py, (b) add a branch in _build_config
+below — model name_or_path (HF default or a local *_MODEL_PATH mount),
+is_flux/is_xl arch flags, noise scheduler + sample-block params, and (c) add
+a *_MODEL_PATH/*_MODEL_NAME pair in core/config.py plus a compose bind-mount
+when a local checkpoint should be supported. The router Literal is the API
+contract; _build_config is the single place that turns base_model into
+ai-toolkit config.
 """
 import asyncio
 import json
@@ -73,12 +119,64 @@ def _build_config(job) -> dict:
     wrapper containing one ``sd_trainer`` process — toolkit/config.py refuses
     configs without a "config" section. Older versions used ``job: train``
     with the options at the top level; do not "fix" this back to that shape.
+
+    SDXL/SD1 model resolution: if the matching *_MODEL_PATH setting is set,
+    name_or_path points at the local model mounted at /models/<family> (a
+    diffusers-format folder, or a single-file .safetensors when *_MODEL_NAME
+    is given) — ai-toolkit loads single files via from_single_file(), no
+    conversion step needed. Otherwise the HF default is used (a one-time
+    download). The model block sets ``is_xl: true`` for SDXL so ai-toolkit
+    builds a StableDiffusionXLPipeline; SD1 leaves it false (and is_flux
+    false) so ai-toolkit uses the default sd1 arch (StableDiffusionPipeline).
+    See the module docstring for how to add a new base model type.
     """
     params = job.params or {}
     steps = int(params.get("steps", 1000))
     lr = float(params.get("learning_rate", 1e-4))
     is_flux = job.base_model == "flux-dev"
+    is_sd1 = job.base_model == "sd1"
+    is_xl = job.base_model == "sdxl"
     save_every = max(50, steps // 10)
+
+    # resolution control for small-GPU users. FLUX is capped at 1024 (its
+    # native training resolution; bigger just wastes VRAM). SD1 defaults to
+    # 512 (its native resolution) and is capped at 1024 — SD1 was trained at
+    # 512 and does not meaningfully benefit from higher. SDXL honors the
+    # request as given.
+    resolution = int(params.get("resolution", 512 if is_sd1 else 1024))
+    if is_flux or is_sd1:
+        resolution = min(resolution, 1024)
+
+    if is_flux:
+        model_name_or_path = "black-forest-labs/FLUX.1-dev"
+    elif is_xl:
+        if settings.SDXL_MODEL_PATH:
+            local = "/models/sdxl"
+            if settings.SDXL_MODEL_NAME:
+                local = f"{local}/{settings.SDXL_MODEL_NAME}"
+            logger.info("training %s: using local SDXL model at %s", str(job.id), local)
+            model_name_or_path = local
+        else:
+            logger.warning(
+                "training %s: SDXL_MODEL_PATH not set — falling back to %s "
+                "(downloads ~7GB from Hugging Face on first use)",
+                str(job.id), "stabilityai/stable-diffusion-xl-base-1.0",
+            )
+            model_name_or_path = "stabilityai/stable-diffusion-xl-base-1.0"
+    else:  # sd1
+        if settings.SD1_MODEL_PATH:
+            local = "/models/sd1"
+            if settings.SD1_MODEL_NAME:
+                local = f"{local}/{settings.SD1_MODEL_NAME}"
+            logger.info("training %s: using local SD1 model at %s", str(job.id), local)
+            model_name_or_path = local
+        else:
+            logger.warning(
+                "training %s: SD1_MODEL_PATH not set — falling back to %s "
+                "(downloads ~4GB from Hugging Face on first use)",
+                str(job.id), "runwayml/stable-diffusion-v1-5",
+            )
+            model_name_or_path = "runwayml/stable-diffusion-v1-5"
 
     process = {
         "type": "sd_trainer",
@@ -102,7 +200,7 @@ def _build_config(job) -> dict:
                 "folder_path": job.dataset_dir,
                 "caption_ext": "txt",
                 "cache_latents_to_disk": True,
-                "resolution": [1024],
+                "resolution": [resolution],
             }
         ],
         "train": {
@@ -110,30 +208,38 @@ def _build_config(job) -> dict:
             "steps": steps,
             "gradient_accumulation_steps": 1,
             "train_unet": True,
-            "train_text_encoder": False,   # FLUX TE is not LoRA-able; SDXL TE off by default
+            "train_text_encoder": False,   # FLUX TE is not LoRA-able; SDXL/SD1 TE off by default
             "gradient_checkpointing": True,
             "optimizer": "adamw8bit",
             "lr": lr,
             "noise_scheduler": "flowmatch" if is_flux else "ddpm",
             "dtype": "bf16",
-            "ema_config": {"use_ema": True, "ema_decay": 0.99},
+            # 6GB-VRAM tuning (sd1/sdxl): EMA off (no fp32 shadow weights);
+            # cache_latents_to_disk is set on the dataset block; batch 1 +
+            # grad accum 1 + gradient checkpointing + frozen TE are the rest
+            # of the 6GB recipe (see module docstring). FLUX keeps EMA on.
+            "ema_config": {"use_ema": True, "ema_decay": 0.99} if is_flux else {"use_ema": False},
         },
         "model": {
-            "name_or_path": (
-                "black-forest-labs/FLUX.1-dev" if is_flux
-                else "stabilityai/stable-diffusion-xl-base-1.0"
-            ),
+            "name_or_path": model_name_or_path,
             "is_flux": is_flux,
+            # required for SDXL: without is_xl, ai-toolkit's ModelConfig infers
+            # arch 'sd1' and loads the checkpoint with StableDiffusionPipeline
+            # instead of StableDiffusionXLPipeline (breaks single-file loading
+            # and samples wrong). is_xl is ignored for flux; sd1 must leave it
+            # false so ai-toolkit uses the default sd1 arch.
+            "is_xl": is_xl,
             "quantize": is_flux,   # 8bit mixed precision; FLUX needs it on 24GB class cards
         },
         "sample": {
             # generic placeholder prompt — real users will want their own
             # subject / trigger word here. Prompts could later come from params.
+            # sd1/sdxl both sample with euler_a / guidance 7.0 / 30 steps.
             "prompts": ["a photo of a person"],
             "sampler": "flowmatch" if is_flux else "euler_a",  # 'sgm' was removed upstream
             "sample_every": save_every,
-            "width": 1024,
-            "height": 1024,
+            "width": resolution,
+            "height": resolution,
             "seed": 42,
             "walk_seed": True,
             "guidance_scale": 3.5 if is_flux else 7.0,

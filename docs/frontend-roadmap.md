@@ -67,9 +67,11 @@ fallback. The contract additions the mobile app must handle:
 The backend now lets users train image LoRAs from a zip of images and use the result on
 image generation. New endpoints:
 
-- `POST /v1/trainings` — multipart form: `name`, `base_model` (`flux-dev` | `sdxl`),
+- `POST /v1/trainings` — multipart form: `name`, `base_model` (`flux-dev` | `sdxl` | `sd1`),
   `dataset` (zip of 3+ images; optional `{image}.txt` captions ride along), `steps`
-  (default 1000), `learning_rate` (default 1e-4). Returns `{job_id, status: "queued"}`.
+  (default 1000), `learning_rate` (default 1e-4), `resolution` (default 1024, or 512 for
+  `sd1`; the training width=height in pixels, 256–2048 — lower it like 512 for small GPUs,
+  FLUX and SD1 are capped at 1024 server-side). Returns `{job_id, status: "queued"}`.
 - `GET /v1/trainings` — list this user's jobs (newest first, capped at 50).
 - `GET /v1/trainings/{id}` — detail; 404 for missing or foreign jobs.
 - `POST /v1/trainings/{id}/cancel` — sets a Redis flag the trainer checks between steps.
@@ -90,8 +92,9 @@ generate response gains `"lora"` (the filename ComfyUI loaded).
 
 - **Mobile implications:**
   - Add a **"Train" screen**: upload an image zip (`expo-document-picker`), pick base
-    model + steps + learning rate, show a progress card driven by the SSE stream (stage +
-    progress bar), and a link to download/open the artifact when `done` arrives.
+    model + steps + learning rate + resolution, show a progress card driven by the SSE
+    stream (stage + progress bar), and a link to download/open the artifact when `done`
+    arrives.
   - Add a **trained-LoRA picker on the image generation screen**: `GET /v1/trainings`
     filtered to `status == "complete"`, send the chosen job id as `training_id` on
     generate; surface the 400/404/409 error strings verbatim.

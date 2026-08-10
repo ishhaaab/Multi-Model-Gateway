@@ -18,6 +18,27 @@ class Settings(BaseSettings):
     # on the host directly, set both to the same real folder.
     COMFY_LORA_CONTAINER_PATH: str = "/comfy-loras"
 
+    # HOST path to your SDXL model for training (a diffusers-format folder OR
+    # a directory containing a single-file .safetensors checkpoint). Mounted
+    # into the trainer container at /models/sdxl. Leave empty to fall back to
+    # the Hugging Face model (large download — not recommended).
+    SDXL_MODEL_PATH: str = ""
+
+    # optional filename inside SDXL_MODEL_PATH when it points at a directory of
+    # checkpoints (e.g. "sdxl-base.safetensors").
+    SDXL_MODEL_NAME: str = ""
+
+    # HOST path to your SD1 (stable-diffusion-1.x) model for training (a
+    # diffusers-format folder OR a directory containing a single-file
+    # .safetensors checkpoint). Mounted into the trainer container at
+    # /models/sd1. Leave empty to fall back to the Hugging Face model
+    # (~4GB download — not recommended).
+    SD1_MODEL_PATH: str = ""
+
+    # optional filename inside SD1_MODEL_PATH when it points at a directory of
+    # checkpoints (e.g. "sd15-base.safetensors").
+    SD1_MODEL_NAME: str = ""
+
     TRAINING_ROOT: str = "/app/training_data"   # shared volume for fine-tuning datasets + artifacts
     TRAINING_JOB_TIMEOUT_SECONDS: int = 7200    # max wall-clock for one image-LoRA training run
 
