@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-11 — Data integrity fixes (D4 + R7)
+
+- Backend — optional limit/offset pagination on convo/presets/templates (D4); hourly expired refresh-token sweep via arq cron (R7).
+
 ## 2026-08-11 — Reliability fixes (R3–R6)
 
 - Backend — honest local token counts via token_provenance + off-path tokenize sync (R3); research rejects without a capable model and stores the resolved model (R4); strict ComfyUI anchor detection + upload validation (R5); search degradation is surfaced via metric + honest tool text (R6).

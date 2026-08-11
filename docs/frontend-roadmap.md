@@ -34,6 +34,12 @@ fallback. The contract additions the mobile app must handle:
   `GET /v1/convo/{id}` changed from `"conversation not found"` to `"convo not found"` — treat
   both statuses generically and don't match on detail strings.
 
+- **Optional pagination on list endpoints (D4):** `GET /v1/convo`, `GET /v1/presets`, and
+  `GET /v1/templates` now accept optional `limit` (1–200) and `offset` (≥0) query params.
+  Response shapes are unchanged (`{"data": [...]}` for presets/templates, bare array for
+  convo); omitting `limit` keeps the previous no-limit behavior. Clients may pass
+  `?limit=N&offset=M` to page through long lists.
+
 - **New endpoints (plain JSON CRUD, no SSE):**
   - `GET /v1/providers` — list this user's providers (seeds the default env-based rows on
     first visit if none exist).

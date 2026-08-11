@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Query
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, exists
@@ -28,16 +28,24 @@ async def convo_create(convo_data: ConvoCreate, db: AsyncSession = Depends(get_d
     return {"message": "conversation created", "id": str(new_convo.id)}
 
 @router.get("/convo")
-async def convo_get(db: AsyncSession = Depends(get_db), user_id= Depends(security.get_current_user)):
+async def convo_get(
+    db: AsyncSession = Depends(get_db),
+    user_id= Depends(security.get_current_user),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
     # list conversations that actually have messages and hide orphans left behind 
     # when a send fails before the model responds.
-    query= await db.execute(
+    query= (
         select(Conversation)
         .where(Conversation.user_id== user_id)
         .where(exists().where(Message.conversation_id == Conversation.id))
         .order_by(Conversation.created_at.desc())
     )
-    conversations = query.scalars().all()
+    if limit is not None:
+        query = query.limit(limit).offset(offset)
+    result = await db.execute(query)
+    conversations = result.scalars().all()
     return conversations
 
 # get the messages from a specific conversation

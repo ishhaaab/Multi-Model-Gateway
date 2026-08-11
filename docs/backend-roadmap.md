@@ -180,6 +180,11 @@ CR-17/18/19/20/21/22/23.
 
 #### R7 — No background sweep of expired refresh tokens · LOW (MED-2)
 - **Fix:** arq cron job hourly: `DELETE FROM refresh_tokens WHERE expires_at < now()`.
+- **Status: DONE** — `worker.py` schedules `sweep_expired_tokens` via arq `cron_jobs`
+  (`cron(sweep_expired_tokens, minute=0)`, hourly at minute 0); the job deletes
+  `refresh_tokens` rows whose `expires_at` is in the past on a fresh `AsyncSessionLocal`
+  session. Worker restart required to pick up cron changes (arq does not hot-reload). See
+  "Data integrity fixes implemented (D4 + R7)" below.
 
 ### Data integrity (minor)
 
@@ -200,6 +205,11 @@ CR-17/18/19/20/21/22/23.
     `conversations.id` with `ondelete='CASCADE'`. Verified in `4b602081a1e1_add_memories_table.py`.
 - **D4 — No pagination on list endpoints.** Add `limit`/`offset` to `GET /convo`, `/presets`,
   `/templates`.
+  - **Status: DONE** — `GET /v1/convo`, `/v1/presets`, `/v1/templates` accept optional
+    `limit` (1–200) and `offset` (≥0) query params; when `limit` is set the `select` gets
+    `.limit(limit).offset(offset)` applied before execution (existing `order_by` preserved).
+    `limit=None` keeps the previous no-limit behavior; response shapes unchanged. See
+    "Data integrity fixes implemented (D4 + R7)" below.
 
 ### Maintainability
 
@@ -557,3 +567,27 @@ The Phase 2 reliability follow-ups (CR-10/14/15/16), landed together.
   KSampler + KSamplerAdvanced raises without `param_map` and passes with it; multiple latent
   nodes raise; `inject_params` leaves `batch_size` unset on ambiguous latent graphs; a
   KSamplerAdvanced-only graph gets no LoRA injection; `param_map` still beats auto-detect.
+
+## Data integrity fixes implemented (D4 + R7)
+
+The Phase 3 data-integrity leftovers (D4 + R7), landed together.
+
+- **D4 — optional pagination on list endpoints.**
+  - `GET /v1/convo`, `GET /v1/presets`, `GET /v1/templates` now accept two optional query
+    params: `limit: int | None` (`ge=1, le=200`, default `None` = no limit, previous
+    behavior) and `offset: int` (`ge=0`, default `0`). When `limit` is set, `.limit(limit)
+    .offset(offset)` is chained onto the existing `select` before execution, keeping each
+    endpoint's `order_by` untouched (convo sorts `created_at.desc()`, presets/templates have
+    no explicit order). Response shapes are unchanged — `{"data": [...]}` for
+    presets/templates, a bare array for convo.
+- **R7 — hourly expired refresh-token sweep.**
+  - `worker.py` adds `sweep_expired_tokens(ctx)`, which on a fresh `AsyncSessionLocal`
+    session runs `delete(RefreshToken).where(RefreshToken.expires_at < datetime.utcnow())`
+    and commits — no orphaned expired `refresh_tokens` rows accumulate.
+  - `WorkerSettings` gains `cron_jobs = [cron(sweep_expired_tokens, minute=0)]` (arq 0.25,
+    the `from arq import cron` API), firing hourly at minute 0. Everything else in
+    `WorkerSettings` is unchanged. **The worker container must be restarted for cron changes
+    to take effect** — arq does not hot-reload.
+- **Tests:** `backend/tests/test_worker.py` asserts `WorkerSettings.cron_jobs` is non-empty,
+  `WorkerSettings.functions` still includes `run_research`, and `sweep_expired_tokens` is
+  callable (offline; the sweep itself is never invoked).

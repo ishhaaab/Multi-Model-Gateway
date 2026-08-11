@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -58,8 +58,16 @@ async def create_preset(request: PresetCreate, db: AsyncSession = Depends(get_db
     return preset
 
 @router.get("/presets")
-async def list_presets(db: AsyncSession = Depends(get_db), user_id: str = Depends(get_current_user)):
-    result = await db.execute(select(Preset).where(Preset.user_id == user_id))
+async def list_presets(
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    query = select(Preset).where(Preset.user_id == user_id)
+    if limit is not None:
+        query = query.limit(limit).offset(offset)
+    result = await db.execute(query)
     return {"data": result.scalars().all()}
 
 @router.get("/presets/{preset_id}")
