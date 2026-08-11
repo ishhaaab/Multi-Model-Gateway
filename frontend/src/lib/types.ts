@@ -102,6 +102,57 @@ export interface PresetCreate {
 
 export type PresetUpdate = Partial<PresetCreate>;
 
+// ───────────── Providers (BYO-key) ─────────────
+export type ProviderType =
+  | "openai_compatible"
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "openrouter";
+
+export type ProviderRole = "local" | "cloud";
+
+export interface ProviderRow {
+  id: string;
+  name: string;
+  type: ProviderType;
+  role: ProviderRole;
+  base_url?: string | null;
+  default_model?: string | null;
+  is_default: boolean;
+  enabled: boolean;
+  created_at: string;
+  api_key_masked: string;
+}
+
+export interface ProviderCreate {
+  name: string;
+  type: ProviderType;
+  role: ProviderRole;
+  base_url?: string | null;
+  api_key?: string | null;
+  default_model?: string | null;
+  is_default?: boolean;
+  enabled?: boolean;
+}
+
+export interface ProviderUpdate {
+  name?: string;
+  type?: ProviderType;
+  role?: ProviderRole;
+  base_url?: string | null;
+  api_key?: string | null;
+  default_model?: string | null;
+  is_default?: boolean;
+  enabled?: boolean;
+}
+
+export interface ProviderTestResult {
+  ok: boolean;
+  model?: string | null;
+  error?: string | null;
+}
+
 // ───────────── Templates ─────────────
 export interface PromptTemplate {
   id: string;

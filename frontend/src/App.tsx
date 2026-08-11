@@ -10,6 +10,7 @@ import RegisterPage from "@/pages/register";
 import ChatPage from "@/pages/chat";
 import ImagesPage from "@/pages/images";
 import PresetsPage from "@/pages/presets";
+import ProvidersPage from "@/pages/providers";
 import TemplatesPage from "@/pages/templates";
 import WorkflowsPage from "@/pages/workflows";
 import AgentPage from "@/pages/agent";
@@ -43,6 +44,7 @@ export default function App() {
           <Route path="/chat/:id" element={<ChatPage />} />
           <Route path="/images" element={<ImagesPage />} />
           <Route path="/presets" element={<PresetsPage />} />
+          <Route path="/providers" element={<ProvidersPage />} />
           <Route path="/templates" element={<TemplatesPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/agent" element={<AgentPage />} />

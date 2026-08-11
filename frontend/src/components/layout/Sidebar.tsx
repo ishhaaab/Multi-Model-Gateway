@@ -13,6 +13,7 @@ import {
   MessagesSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  KeyRound,
 } from "lucide-react";
 import { useLayoutStore, SIDEBAR_MIN, SIDEBAR_MAX } from "@/stores/layout-store";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -30,11 +31,12 @@ const MODES = [
   { to: "/images", label: "Image", icon: ImageIcon },
 ];
 
-// Secondary destinations — agent + research + cookbook.
+// Secondary destinations — agent + research + cookbook + providers.
 const TOOLS = [
   { to: "/agent", label: "Agent", icon: Bot },
   { to: "/research", label: "Research", icon: Telescope },
   { to: "/cookbook", label: "Cookbook", icon: Cpu },
+  { to: "/providers", label: "Providers", icon: KeyRound },
 ];
 
 export function Sidebar() {

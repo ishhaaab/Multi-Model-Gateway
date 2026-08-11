@@ -8,6 +8,10 @@ import type {
   Preset,
   PresetCreate,
   PresetUpdate,
+  ProviderRow,
+  ProviderCreate,
+  ProviderUpdate,
+  ProviderTestResult,
   PromptTemplate,
   TemplateCreate,
   TemplateUpdate,
@@ -101,6 +105,23 @@ export const presetApi = {
 
   delete: (id: string) =>
     apiClient.request<{ detail: string }>("DELETE", `/v1/presets/${id}`),
+};
+
+// ───────────── Providers ({ data: [...] }) ─────────────
+export const providerApi = {
+  list: () => apiClient.request<ListEnvelope<ProviderRow>>("GET", "/v1/providers"),
+
+  create: (data: ProviderCreate) =>
+    apiClient.request<ProviderRow>("POST", "/v1/providers", data),
+
+  update: (id: string, data: ProviderUpdate) =>
+    apiClient.request<ProviderRow>("PATCH", `/v1/providers/${id}`, data),
+
+  delete: (id: string) =>
+    apiClient.request<{ detail: string }>("DELETE", `/v1/providers/${id}`),
+
+  test: (id: string) =>
+    apiClient.request<ProviderTestResult>("POST", `/v1/providers/${id}/test`),
 };
 
 // ───────────── Templates ({ data: [...] }) ─────────────

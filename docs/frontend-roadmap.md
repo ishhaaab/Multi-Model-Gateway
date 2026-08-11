@@ -57,6 +57,11 @@ fallback. The contract additions the mobile app must handle:
 - **Mobile/web implications:**
   - Add a **"Providers" settings screen** (list/add/edit/delete + test button; fields above;
     masked key display; key input write-only).
+    - **Web SPA status: DONE.** `frontend/src/pages/providers.tsx` + `components/settings/ProviderPanel.tsx`
+      + `ProviderForm.tsx` + `stores/provider-store.ts` implement the full screen — list/create/
+      edit/delete/test against `/v1/providers`, masked-key display, type + role badges,
+      default + enabled toggles, and a live connection test with inline result. The mobile
+      port must mirror this handling.
   - Optionally a **provider picker in the chat composer** that sends `provider_id` alongside
     the existing preset/mode controls.
   - Update the ported `types.ts` / `api-endpoints.ts` with the provider endpoints and
