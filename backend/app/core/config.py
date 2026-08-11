@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     LM_CHAT_MODEL: str = ""   # default chat model on LM Studio; empty => falls back to LM_DEFAULT_MODEL
 
     COMFY_URL: str = "http://host.docker.internal:8188"   # ComfyUI server for image generation
+    IMAGE_FILE_TTL_SECONDS: int = 604800   # ownership TTL for generated image filenames
 
     # HOST path of your ComfyUI models/loras folder; used by docker-compose as
     # the bind source mounted into the backend container at
@@ -51,6 +52,8 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 30
     RATE_LIMIT_WINDOW_SECONDS: int = 60
     AUTH_RATE_LIMIT_PER_MINUTE: int = 10
+
+    METRICS_TOKEN: str = ""   # bearer token for GET /metrics; empty disables the endpoint (fail-closed)
 
     # max recent messages pulled into the prompt as direct context
     # (older turns remain reachable via semantic memory / RAG)

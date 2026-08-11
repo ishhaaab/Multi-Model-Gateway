@@ -159,6 +159,31 @@ else
     if [ -n "$OR_API_KEY" ]; then info "  OPENROUTER_API_KEY: set"; else info "  OPENROUTER_API_KEY: not set (app boots without it)"; fi
 fi
 
+# ------------------------------------------------- metrics token (S2)
+# METRICS_TOKEN gates GET /metrics (empty disables the endpoint). Generate one
+# when .env lacks it (idempotent) and mirror it into monitoring/metrics_token so
+# Prometheus can authenticate. The file must contain EXACTLY the token — the
+# backend compares the header string, so no trailing whitespace/newline.
+METRICS_TOKEN_FILE="$REPO_ROOT/monitoring/metrics_token"
+mkdir -p "$REPO_ROOT/monitoring"
+if grep -q '^METRICS_TOKEN=' "$ENV_FILE"; then
+    METRICS_TOKEN="$(grep '^METRICS_TOKEN=' "$ENV_FILE" | head -n1 | cut -d= -f2-)"
+    # Trim surrounding whitespace (incl. a trailing CR from Windows line
+    # endings) and write the trimmed value back so .env and
+    # monitoring/metrics_token can never drift — the backend compares the
+    # header string byte-for-byte. Idempotent: when the value already
+    # matches, set_env's rewrite leaves every line byte-identical.
+    METRICS_TOKEN="$(printf '%s' "$METRICS_TOKEN" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    set_env "METRICS_TOKEN" "$METRICS_TOKEN"
+    info "Syncing monitoring/metrics_token from existing METRICS_TOKEN in .env."
+else
+    METRICS_TOKEN="$(openssl rand -base64 32 2>/dev/null || head -c 32 /dev/urandom | base64)"
+    set_env "METRICS_TOKEN" "$METRICS_TOKEN"
+    info "Generated METRICS_TOKEN in .env."
+fi
+printf '%s' "$METRICS_TOKEN" > "$METRICS_TOKEN_FILE"
+ok "Wrote monitoring/metrics_token (matches METRICS_TOKEN)."
+
 # ------------------------------------------------ Step 3: SkipStart escape hatch
 if [ "$SKIP_START" -eq 1 ]; then
     info "Skipping stack start (--skip-start)."

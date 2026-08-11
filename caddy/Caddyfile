@@ -14,12 +14,9 @@
 	}
 
 	# Everything else to the built SPA. try_files gives client-side-routing
-	# fallback so deep links resolve to index.html.
-	# ComfyUI image previews: the SPA rewrites /view URLs to this same origin.
-	handle /view* {
-		reverse_proxy host.docker.internal:8188
-	}
-
+	# fallback so deep links resolve to index.html. (Image files are NOT
+	# proxied here anymore — S3: the SPA fetches them from the authed
+	# /api/v1/images/file endpoint.)
 	handle {
 		root * /srv
 		try_files {path} /index.html

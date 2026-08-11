@@ -1,13 +1,15 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from app.routers import chat, models, auth, convo, presets, templates, images, workflows, agent, research, hardware, providers, trainings
 from app.middleware.ratelimit import RateLimitMiddleware
 from app.core.redis import get_redis, close_redis
 from app.core.config import settings
 from app.core.exceptions import AppError
+from app.core.metrics_auth import metrics_authorized
 from app.core.queue import close_queue
 from app.services.mcp_client import mcp_manager
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -33,7 +35,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-Instrumentator().instrument(app).expose(app)
+# instrument the app but do NOT let the instrumentator register /metrics itself:
+# that route is defined below behind a bearer-token gate (S2).
+Instrumentator().instrument(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,6 +61,15 @@ async def app_error_handler(request: Request, exc: AppError):
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+async def metrics(request: Request):
+    if not settings.METRICS_TOKEN:
+        raise HTTPException(status_code=404, detail="metrics disabled")
+    if not metrics_authorized(request.headers.get("Authorization"), settings.METRICS_TOKEN):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 app.include_router(chat.router, prefix = "/v1")

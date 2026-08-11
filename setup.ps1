@@ -149,6 +149,33 @@ if (Test-Path $EnvFile) {
     Write-Info "  OPENROUTER_API_KEY: $(if ($orKey) { 'set' } else { 'not set (app boots without it)' })"
 }
 
+# --- Step 2b — metrics token (S2) ---
+# METRICS_TOKEN gates GET /metrics (empty disables the endpoint). Generate one
+# when .env lacks it (idempotent) and mirror it into monitoring/metrics_token so
+# Prometheus can authenticate. The file must contain EXACTLY the token — the
+# backend compares the header string, so no BOM, no trailing whitespace.
+$metricsTokenFile = Join-Path $RepoRoot "monitoring\metrics_token"
+New-Item -ItemType Directory -Path (Split-Path $metricsTokenFile) -Force | Out-Null
+$lines = Get-Content $EnvFile
+$metricsRe = '^METRICS_TOKEN='
+$metricsLine = $lines | Where-Object { $_ -match $metricsRe } | Select-Object -First 1
+if ($metricsLine) {
+    # Trim any whitespace padding and write the trimmed value back so .env and
+    # monitoring/metrics_token can never drift (idempotent: when the value
+    # already matches, the rewrite is a byte-for-byte no-op).
+    $metricsToken = ($metricsLine -replace $metricsRe, '').Trim()
+    $lines = Set-EnvLine $lines "METRICS_TOKEN" $metricsToken
+    [System.IO.File]::WriteAllLines($EnvFile, $lines, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Info "Syncing monitoring/metrics_token from existing METRICS_TOKEN in .env."
+} else {
+    $metricsToken = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
+    $lines = Set-EnvLine $lines "METRICS_TOKEN" $metricsToken
+    [System.IO.File]::WriteAllLines($EnvFile, $lines, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Info "Generated METRICS_TOKEN in .env."
+}
+[System.IO.File]::WriteAllText($metricsTokenFile, $metricsToken, (New-Object System.Text.UTF8Encoding($false)))
+Write-Ok "Wrote monitoring/metrics_token (matches METRICS_TOKEN)."
+
 # --- Step 3 — SkipStart escape hatch ---
 if ($SkipStart) {
     Write-Info "Skipping stack start (-SkipStart)."

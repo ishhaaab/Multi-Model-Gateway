@@ -21,6 +21,8 @@ A self-hosted inference orchestration layer — a personal mini-OpenRouter that 
    Already have a `.env`? The script detects it and leaves it unchanged.
 
    The setup scripts accept two flags: `-SkipStart` / `--skip-start` prepares `.env` without starting Docker (`.\setup.ps1 -SkipStart`, `./setup.sh --skip-start`), and `-NonInteractive` / `--non-interactive` skips the prompts for CI/automation (`.\setup.ps1 -NonInteractive`, `./setup.sh --non-interactive`).
+
+   > Run setup before `docker compose up` so `monitoring/metrics_token` exists — otherwise Docker creates it as a directory and Prometheus can't read the token.
 2. **Open the API docs:** http://localhost:2727/docs (Swagger UI).
 3. **Register an account** (`POST /auth/register`).
 4. **Add your providers** — see [Adding providers](#adding-providers). A "Local (LM Studio)" provider row is seeded automatically when `LM_URL` is set.
@@ -134,7 +136,7 @@ A self-hosted inference orchestration layer — a personal mini-OpenRouter that 
 | Method | Path | Description | Auth |
 |---|---|---|---|
 | GET | `/health` | Health check | No |
-| GET | `/metrics` | Prometheus metrics | No |
+| GET | `/metrics` | Prometheus metrics | Bearer token (`METRICS_TOKEN`) |
 
 ---
 
@@ -229,7 +231,7 @@ llm-gateway/
 |---|---|---|---|
 | `postgres` | `pgvector/pgvector:pg16` | internal | Persistent storage + pgvector extension |
 | `redis` | `redis:7-alpine` | internal | Rate limiting backend |
-| `backend` | Build from `./backend/Dockerfile` | `2727:8000` | FastAPI application |
+| `backend` | Build from `./backend/Dockerfile` | `127.0.0.1:2727:8000` (loopback-only) | FastAPI application |
 | `worker` | Build from `./backend/Dockerfile` | internal | arq deep-research job worker (same image as backend) |
 | `searxng` | `searxng/searxng` | internal | Optional self-hosted search for `web_search` + research (start with `--profile search`) |
 | `prometheus` | `prom/prometheus` | `9090:9090` | Metrics collection |
@@ -266,6 +268,7 @@ Auto HTTPS is disabled. The frontend should call `/api/v1/*` and Caddy will forw
 | `ACCESS_TOKEN_EXPIRY_MINUTES` | Yes | Access token TTL (60) |
 | `REFRESH_TOKEN_EXPIRY_DAYS` | Yes | Refresh token TTL (7) |
 | `GRAFANA_ADMIN_PASSWORD` | Yes | Grafana admin login password, required by docker-compose; the setup script generates one if you don't set it |
+| `METRICS_TOKEN` | No | Bearer token for `GET /metrics`; empty disables the endpoint (fail-closed). The setup scripts generate one and mirror it to `monitoring/metrics_token` for Prometheus |
 | `LANGFUSE_PUBLIC_KEY` | No | Langfuse Cloud public key |
 | `LANGFUSE_SECRET_KEY` | No | Langfuse Cloud secret key |
 | `LANGFUSE_BASE_URL` | No | Langfuse endpoint |

@@ -10,6 +10,7 @@ alembic/versions/__pycache__/
 node_modules/
 .claude/
 secrets/
+monitoring/metrics_token
 frontend/.env.production
 *.png
 comfy-checkpoints/

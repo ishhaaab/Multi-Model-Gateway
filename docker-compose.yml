@@ -17,7 +17,9 @@ services:
       context: ./backend
       target: dev
     ports:
-      - "2727:8000"
+      # loopback-only (S2): Caddy on :80 is the only ingress for the tailnet;
+      # 2727 stays reachable from the host for dev/docs but not from LAN devices.
+      - "127.0.0.1:2727:8000"
     volumes:
       - ./backend:/app
       - training_data:/app/training_data
@@ -105,6 +107,8 @@ services:
       - "9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      # bearer token for the gated /metrics endpoint (written by setup scripts)
+      - ./monitoring/metrics_token:/etc/prometheus/metrics_token:ro
 
   grafana:
     image: grafana/grafana

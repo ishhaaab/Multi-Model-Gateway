@@ -2,6 +2,7 @@ import httpx
 import shutil
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field, field_validator
@@ -12,6 +13,7 @@ from app.core.redis import get_redis
 from app.core.config import settings
 from app.models.trainings import TrainingJob
 from app.services.template import rewrite_prompt
+from app.services.image_security import validate_image_ref
 from app.services.comfy import (
     generate_image,
     get_job_status,
@@ -124,9 +126,49 @@ async def job_status(prompt_id: str, user_id: str = Depends(get_current_user)):
         # unknown, expired, or someone else's job
         raise HTTPException(status_code=404, detail="job not found")
     try:
-        return await get_job_status(prompt_id)
+        status = await get_job_status(prompt_id)
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail="ComfyUI unavailable")
+    # remember who owns each finished image so /images/file can authorise it
+    if status.get("status") == "complete":
+        for img in status["images"]:
+            await redis.set(
+                f"imgfile:{img['filename']}",
+                str(user_id),
+                ex=settings.IMAGE_FILE_TTL_SECONDS,
+            )
+    return status
+
+
+@router.get("/images/file")
+async def image_file(
+    filename: str,
+    subfolder: str = "",
+    type: str = "output",
+    user_id: str = Depends(get_current_user),
+):
+    # ownership: only the user who generated the image may fetch the file
+    redis = await get_redis()
+    owner = await redis.get(f"imgfile:{filename}")
+    if owner != str(user_id):
+        raise HTTPException(status_code=404, detail="image not found")
+    try:
+        filename, subfolder, type = validate_image_ref(filename, subfolder, type)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    params = {"filename": filename}
+    if subfolder:
+        params["subfolder"] = subfolder
+    params["type"] = type
+    try:
+        async with httpx.AsyncClient(timeout=60, follow_redirects=False) as client:
+            resp = await client.get(f"{settings.COMFY_URL}/view", params=params)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="image backend unavailable")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail="image unavailable")
+    media = resp.headers.get("content-type", "application/octet-stream")
+    return Response(content=resp.content, media_type=media)
 
 
 @router.get("/images/aspect-ratios")

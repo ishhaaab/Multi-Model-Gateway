@@ -185,11 +185,11 @@ generate response gains `"lora"` (the filename ComfyUI loaded).
       every 2s up to 90 times).
     - Results: image grid, tap to fullscreen `Modal`, long-press to save via `expo-media-library`.
     - History: `FlatList` from `image-store` (AsyncStorage), tap to re-open.
-16. **Image URL rewriting:** port `getImageDisplayUrl()` — rewrites ComfyUI's
-    `host.docker.internal:8188` to the gateway host. Caddy proxies `/view*` → ComfyUI, so the
-    phone fetches `https://<gateway-host>/view?filename=...` over Tailscale. *(If the backend
-    S3 fix replaces the open `/view*` proxy with an authed file route, this rewrite target
-    changes — see backend roadmap.)*
+16. **Image URL fetching (S3 shipped):** image status URLs are now **relative**
+    `/v1/images/file?...` and require the auth token. The SPA should use the returned
+    `url` directly (same gateway origin, so the normal Authorization header applies) and
+    remove any `/view` URL rewriting — the open Caddy `/view*` proxy is gone, so
+    `getImageDisplayUrl()` must not rewrite ComfyUI hosts anymore.
 
 ### Phase 4 — Settings + config screens
 
@@ -235,7 +235,8 @@ generate response gains `"lora"` (the filename ComfyUI loaded).
 - `frontend/src/lib/api-client.ts:102-167` — 401-refresh-retry + coalescing; ports to RN `fetch`.
 - `frontend/src/hooks/use-chat.ts` + `use-agent.ts` + `use-research-job.ts` — three streaming
   hooks that merge into one mode-dispatching `use-chat.ts`.
-- `frontend/src/lib/utils.ts:76-86` — `getImageDisplayUrl()` (ComfyUI host rewrite).
+- `frontend/src/lib/utils.ts:76-86` — `getImageDisplayUrl()` (ComfyUI host rewrite; **no
+  longer needed** — see "Image URL fetching (S3 shipped)" in Phase 3).
 
 ## Assumptions
 - **`react-native-sse` is the SSE transport** (supports POST + custom headers). Fallback:
@@ -247,9 +248,9 @@ generate response gains `"lora"` (the filename ComfyUI loaded).
 - **Agent + Research results are ephemeral** in the UI (not persisted to the conversation),
   matching the web app. If persistence is later wanted, that requires a backend change
   (write research answer as a `Message`) — out of scope here.
-- **Image display depends on the Caddy `/view*` proxy** (flagged as S3 in the backend roadmap).
-  If S3 is fixed with an authed file route, the `getImageDisplayUrl()` target changes — a
-  one-line change in both the native and web apps.
+- **Image files are fetched through the authed `/v1/images/file?...` route (S3).**
+  The backend returns relative URLs on job status; the app uses them as-is with the
+  normal Authorization header. No `/view` proxying or host rewriting.
 - **Gateway URL is a user-entered setting**, not a build-time env var (no rebuild to change
   URL). Fallback: `EXPO_PUBLIC_GATEWAY_URL` EAS env var if a baked-in URL is preferred.
 - **Android-first; iOS later** (same codebase; iOS build needs Apple Developer credentials).

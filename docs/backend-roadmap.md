@@ -60,6 +60,11 @@ CR-17/18/19/20/21/22/23.
 - **Fix:** remove `ports: 2727:8000` from `docker-compose.yml` (Caddy `:80` is the only
   ingress). Gate `/metrics` behind a `METRICS_TOKEN` env var + `Authorization: Bearer` check,
   or scrape `backend:8000/metrics` only on the internal Docker network.
+- **Status: DONE** — `/metrics` is gated behind `METRICS_TOKEN` (empty token ⇒ 404, fail-closed;
+  missing/wrong `Authorization: Bearer` header ⇒ 401) and the backend port is bound to
+  `127.0.0.1` only. Prometheus authenticates via the mounted `monitoring/metrics_token`
+  credentials file; `setup.ps1`/`setup.sh` generate/sync the token. See "Security fixes
+  implemented (S2 + S3)" below.
 
 #### S3 — ComfyUI `/view*` proxied unauthenticated · HIGH
 - **Where:** `caddy/Caddyfile:19-21` `handle /view* { reverse_proxy host.docker.internal:8188 }`.
@@ -69,6 +74,11 @@ CR-17/18/19/20/21/22/23.
   `GET /v1/images/file?filename=&subfolder=&type=` that requires auth, validates ownership
   (extend the `imgjob:*` Redis map), and rejects `..`/absolute paths. Caddy proxies
   `/api/v1/images/file` only.
+- **Status: DONE** — the open Caddy `/view*` block is removed; `GET /v1/images/file` requires
+  a valid access token plus a Redis `imgfile:{filename}` ownership entry (set on job
+  completion, TTL `IMAGE_FILE_TTL_SECONDS`), and `services/image_security.py` rejects
+  `..`/path separators/bad chars. Status URLs are now relative `/v1/images/file?...`. See
+  "Security fixes implemented (S2 + S3)" below.
 
 #### S4 — Register endpoint allows email enumeration · MEDIUM
 - **Where:** `routers/auth.py:64` `raise HTTPException(400, "user already exists")`.
@@ -156,8 +166,8 @@ CR-17/18/19/20/21/22/23.
 - **CR-19** rate limiter is `BaseHTTPMiddleware` (works today; never touches the body).
 - **CR-20/21** no vector index / no `messages(conversation_id,index)` composite (premature at
   current scale).
-- Image URLs in `comfy.get_job_status` use the internal `COMFY_URL` — the SPA must rewrite them
-  to `/view`.
+- Image URLs from `comfy.get_job_status` are now relative `/v1/images/file?...` (authed, S3) —
+  the SPA uses the returned `url` directly; no `/view` rewrite needed.
 
 ## Fix Plan (ordered)
 
@@ -207,8 +217,11 @@ CR-17/18/19/20/21/22/23.
 - `backend/app/services/agent.py::run_agent` (L88–206) — no `db.close()` (R1) + unbounded
   `messages` (R2).
 - `backend/app/middleware/ratelimit.py::_client_ip` (L87–93) — unconditional XFF trust (S5).
-- `backend/app/main.py:36` + `docker-compose.yml:19` — unauthed `/metrics` + published port (S2).
-- `caddy/Caddyfile:19-21` — open `/view*` proxy (S3).
+- `backend/app/main.py:66` — `/metrics` gated behind `METRICS_TOKEN` (exact `Authorization:
+  Bearer` header; empty token ⇒ 404 fail-closed) (S2).
+- `docker-compose.yml:22` — backend port bound to `127.0.0.1` only (S2).
+- `caddy/Caddyfile` — open `/view*` proxy removed; ComfyUI files served via authed
+  `GET /v1/images/file` (S3).
 
 ## Assumptions
 - **Single-user, personal, tailnet-only.** TLS is terminated by Tailscale; Caddy stays plain
@@ -319,3 +332,34 @@ Implemented:
 Not in this phase (later): dataset management (delete/replace uploads), per-job trigger
 words / caption editing, hyperparameter tuning beyond steps + learning rate, and
 publishing trained LoRAs back to ComfyUI's own model browser.
+
+## Security fixes implemented (S2 + S3)
+
+The two tailnet-exposure fixes from Phase 1, landed together.
+
+- **S2 — `/metrics` gated + backend port loopback-only.**
+  - `app/main.py` no longer calls `Instrumentator().expose(app)`; a hand-written
+    `GET /metrics` route returns **404** when `METRICS_TOKEN` is empty (fail-closed) and
+    **401** without the exact `Authorization: Bearer <token>` header. The comparison lives
+    in a pure module-level helper `_metrics_authorized` (unit-tested).
+  - `docker-compose.yml` binds the backend to `127.0.0.1:2727:8000` — the tailnet reaches
+    the API only through Caddy on `:80`; dev/docs stay available on the host.
+  - Prometheus scrapes `backend:8000/metrics` with `authorization.type: Bearer` +
+    `credentials_file: /etc/prometheus/metrics_token` (mounted from
+    `monitoring/metrics_token`, gitignored).
+  - `setup.ps1`/`setup.sh` generate `METRICS_TOKEN` in `.env` when missing (idempotent) and
+    mirror the exact token into `monitoring/metrics_token` (no trailing whitespace — the
+    backend compares the header string byte-for-byte).
+- **S3 — authed image file endpoint, Caddy `/view*` proxy removed.**
+  - `caddy/Caddyfile`: the `handle /view* { reverse_proxy host.docker.internal:8188 }` block
+    is deleted; only `/api/*` → backend and the SPA remain.
+  - New `GET /v1/images/file?filename=&subfolder=&type=` in `routers/images.py`: requires a
+    valid access token, checks Redis `imgfile:{filename}` ownership (404 when absent/not
+    yours), validates the reference via the new stdlib-only `services/image_security.py`
+    (400 on violation), then proxies the file from ComfyUI's `/view` (502 on backend
+    failure/non-200).
+  - Ownership entries are written when a job completes: `job_status` sets
+    `imgfile:{filename}` → user id with TTL `IMAGE_FILE_TTL_SECONDS` (default 7 days). The
+    existing `imgjob:*` check is unchanged.
+  - `comfy.get_job_status` now returns relative `/v1/images/file?...` URLs (built with
+    `urlencode`); the JSON shape (`status`, `images[].filename`) is unchanged.

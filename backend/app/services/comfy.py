@@ -2,6 +2,7 @@ import httpx
 import uuid
 import copy
 import logging
+from urllib.parse import urlencode
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.workflows import Workflow
@@ -352,7 +353,9 @@ async def get_job_status(prompt_id: str) -> dict:
                 for img in node_output["images"]:
                     images.append({
                         "filename": img["filename"],
-                        "url": f"{COMFY_URL}/view?filename={img['filename']}&subfolder={img.get('subfolder', '')}&type={img.get('type', 'output')}"
+                        # relative on purpose (S3): the client fetches the file
+                        # from the authed gateway route, never ComfyUI directly
+                        "url": "/v1/images/file?" + urlencode({"filename": img["filename"], "subfolder": img.get("subfolder", ""), "type": img.get("type", "output")})
                     })
         
         return {"status": "complete", "images": images}
