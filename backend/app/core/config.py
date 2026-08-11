@@ -1,4 +1,9 @@
+import ipaddress
+import logging
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     LM_URL: str
@@ -54,6 +59,13 @@ class Settings(BaseSettings):
     AUTH_RATE_LIMIT_PER_MINUTE: int = 10
 
     METRICS_TOKEN: str = ""   # bearer token for GET /metrics; empty disables the endpoint (fail-closed)
+
+    # comma-separated CIDRs of trusted reverse proxies (e.g. Caddy) whose
+    # X-Forwarded-For header the rate limiter may trust
+    TRUSTED_PROXIES: str = "172.16.0.0/12"
+
+    # set False to disable open registration (POST /auth/register -> 403)
+    REGISTRATION_ENABLED: bool = True
 
     # max recent messages pulled into the prompt as direct context
     # (older turns remain reachable via semantic memory / RAG)
@@ -115,6 +127,22 @@ class Settings(BaseSettings):
     @property
     def allowed_origins_list(self) -> list[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
+
+    @property
+    def trusted_proxy_networks(self) -> list:
+        """TRUSTED_PROXIES parsed into ipaddress networks. Invalid entries are
+        skipped with a warning; an empty list means no proxy is trusted, so
+        X-Forwarded-For is ignored entirely."""
+        networks = []
+        for part in self.TRUSTED_PROXIES.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                networks.append(ipaddress.ip_network(part, strict=False))
+            except ValueError:
+                logger.warning("ignoring invalid TRUSTED_PROXIES entry: %r", part)
+        return networks
 
     model_config = SettingsConfigDict(
         env_file=".env",

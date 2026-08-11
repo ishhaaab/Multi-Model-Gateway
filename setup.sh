@@ -184,6 +184,19 @@ fi
 printf '%s' "$METRICS_TOKEN" > "$METRICS_TOKEN_FILE"
 ok "Wrote monitoring/metrics_token (matches METRICS_TOKEN)."
 
+# --------------------------------------- security defaults (S5+S7)
+# Add TRUSTED_PROXIES + REGISTRATION_ENABLED only when missing; never
+# overwrite a value the user set deliberately.
+for kv in "TRUSTED_PROXIES=172.16.0.0/12" "REGISTRATION_ENABLED=true"; do
+    key="${kv%%=*}"
+    if ! grep -q "^${key}=" "$ENV_FILE"; then
+        set_env "$key" "${kv#*=}"
+        info "Added $kv to .env."
+    else
+        info "$key already present in .env (left unchanged)."
+    fi
+done
+
 # ------------------------------------------------ Step 3: SkipStart escape hatch
 if [ "$SKIP_START" -eq 1 ]; then
     info "Skipping stack start (--skip-start)."

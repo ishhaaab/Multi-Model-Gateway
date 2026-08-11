@@ -207,6 +207,23 @@ Migrations: 13 Alembic revisions in `backend/alembic/versions/`. `env.py` import
 10. **The worker does not hot-reload** (arq). Restart the worker container after changing research code.
 11. **OpenRouter is OPTIONAL** (local-only is the goal). Today the app won't boot without an OpenRouter key because `config.py:99` calls `get_secret("openrouter_api_key")` at import — this is a KNOWN ISSUE (roadmap S1), not intended behavior.
 
+## Documentation convention
+
+Every fix or feature must be documented in the same commit as the code — no code-only
+changes. The checklist:
+
+- **`CHANGELOG.md`** (repo root) — add a dated entry under the current section (or start a
+  new one) summarizing the change in one line.
+- **`docs/backend-roadmap.md`** — update the issue item's status to DONE with a one-line
+  summary; add/refresh a "Security fixes implemented (...)" section when the change is a
+  security fix. Fix stale lines elsewhere that describe the old behavior.
+- **`README.md`** — new/renamed env vars go in the Environment Variables table; new
+  endpoints go in the API Endpoints tables; behavior notes (e.g. "Locking down signups")
+  go near the flow they affect.
+- **`docs/frontend-roadmap.md`** — add a note in the "Backend contract additions" section
+  when a backend change affects the API contract the SPA/mobile app consumes (new fields,
+  changed status codes, response-shape changes, new endpoints).
+
 ## Agents, MCP, and deep research
 
 - **Agent loop** (`services/agent.py`): model emits tool calls → backend executes via `tools/registry.py` → results appended as `role:"tool"` messages → repeat until the model answers, the iteration cap (`AGENT_MAX_ITERATIONS`=6) is hit, or the token budget (`AGENT_TOKEN_BUDGET`=24000) is spent. Tool failures return as strings to the model (the run survives). Streamed as structured JSON SSE.

@@ -176,6 +176,28 @@ if ($metricsLine) {
 [System.IO.File]::WriteAllText($metricsTokenFile, $metricsToken, (New-Object System.Text.UTF8Encoding($false)))
 Write-Ok "Wrote monitoring/metrics_token (matches METRICS_TOKEN)."
 
+# --- Step 2c — security defaults (S5+S7) ---
+# Add TRUSTED_PROXIES + REGISTRATION_ENABLED only when missing; never
+# overwrite a value the user set deliberately.
+$lines = Get-Content $EnvFile
+$addedDefaults = @()
+foreach ($entry in @(
+    @{ Key = "TRUSTED_PROXIES";      Value = "172.16.0.0/12" }
+    @{ Key = "REGISTRATION_ENABLED"; Value = "true" }
+)) {
+    $re = "^$([regex]::Escape($entry.Key))="
+    if (-not ($lines | Where-Object { $_ -match $re })) {
+        $lines = Set-EnvLine $lines $entry.Key $entry.Value
+        $addedDefaults += "$($entry.Key)=$($entry.Value)"
+    }
+}
+if ($addedDefaults.Count -gt 0) {
+    [System.IO.File]::WriteAllLines($EnvFile, $lines, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Info "Added $($addedDefaults -join ', ') to .env."
+} else {
+    Write-Info "Security defaults already present in .env (TRUSTED_PROXIES, REGISTRATION_ENABLED left unchanged)."
+}
+
 # --- Step 3 — SkipStart escape hatch ---
 if ($SkipStart) {
     Write-Info "Skipping stack start (-SkipStart)."

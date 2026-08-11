@@ -30,6 +30,13 @@ A self-hosted inference orchestration layer — a personal mini-OpenRouter that 
 
 > From a phone over Tailscale, reach the app through Caddy on port 80 (e.g. `http://<tailscale-ip>`); keep port 2727 internal.
 
+### Locking down signups
+
+Registration is open by default (`REGISTRATION_ENABLED=true`). Once you've created your
+account, close the door: set `REGISTRATION_ENABLED=false` in `.env` and restart the backend
+(`docker compose up -d backend`). `POST /auth/register` then returns `403 {"detail":
+"registration disabled"}` for everyone — including attempts to re-register your own email.
+
 ---
 
 ## Architecture
@@ -269,6 +276,8 @@ Auto HTTPS is disabled. The frontend should call `/api/v1/*` and Caddy will forw
 | `REFRESH_TOKEN_EXPIRY_DAYS` | Yes | Refresh token TTL (7) |
 | `GRAFANA_ADMIN_PASSWORD` | Yes | Grafana admin login password, required by docker-compose; the setup script generates one if you don't set it |
 | `METRICS_TOKEN` | No | Bearer token for `GET /metrics`; empty disables the endpoint (fail-closed). The setup scripts generate one and mirror it to `monitoring/metrics_token` for Prometheus |
+| `TRUSTED_PROXIES` | No | Comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` header the rate limiter trusts (default `172.16.0.0/12` — the Docker bridge Caddy sits on). Set to empty to ignore `X-Forwarded-For` entirely |
+| `REGISTRATION_ENABLED` | No | Set `false` to disable open signups — `POST /auth/register` returns 403 "registration disabled" (default `true`) |
 | `LANGFUSE_PUBLIC_KEY` | No | Langfuse Cloud public key |
 | `LANGFUSE_SECRET_KEY` | No | Langfuse Cloud secret key |
 | `LANGFUSE_BASE_URL` | No | Langfuse endpoint |

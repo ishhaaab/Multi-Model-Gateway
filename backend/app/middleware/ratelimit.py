@@ -4,6 +4,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from jose import jwt, JWTError
 from app.core.config import settings
 from app.core.redis import get_redis
+from app.core.trusted_proxies import resolve_client_ip
 import logging
 import time
 import uuid
@@ -85,9 +86,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return None
 
     def _client_ip(self, request: Request) -> str:
-        # Behind a Caddy, the real client IP is the
-        # first hop in X forwarded for; fall back to the direct peer.
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
+        # Trust X-Forwarded-For only when the direct peer is a known reverse
+        # proxy (Caddy); otherwise the direct peer IP is used as-is.
+        return resolve_client_ip(
+            request.client.host if request.client else None,
+            request.headers.get("X-Forwarded-For"),
+            settings.trusted_proxy_networks,
+        )

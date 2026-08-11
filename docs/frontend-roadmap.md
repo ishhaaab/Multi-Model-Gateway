@@ -62,6 +62,21 @@ fallback. The contract additions the mobile app must handle:
   - Update the ported `types.ts` / `api-endpoints.ts` with the provider endpoints and
     `ChatRequest.provider_id`.
 
+### Auth register behavior (S4 + S7)
+
+`POST /auth/register` changed in the backend security pass:
+
+- **No enumeration (S4):** the response is now identical for existing and new emails —
+  `200 {"message":"user created successfully"}` either way. The SPA must **not** use the
+  register response (code or body) to tell whether an address is already registered.
+- **Registration can be disabled (S7):** when the gateway operator sets
+  `REGISTRATION_ENABLED=false`, register returns `403 {"detail":"registration disabled"}`.
+
+- **Mobile/web implications:** treat any non-2xx register response as a **generic error**
+  (e.g. "Signup failed — check the address and password" / "Registration is disabled").
+  Do not surface backend detail strings as account-existence hints, and do not special-case
+  a 400 as "email already taken" (that code is no longer emitted by the backend).
+
 ### Training (image LoRA fine-tuning, backend Phase 6)
 
 The backend now lets users train image LoRAs from a zip of images and use the result on

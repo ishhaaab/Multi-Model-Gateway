@@ -61,11 +61,16 @@ router = APIRouter()
 
 @router.post("/register")
 async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
+    if not settings.REGISTRATION_ENABLED:
+        raise HTTPException(status_code=403, detail="registration disabled")
+
     query = await db.execute(select(User).where(User.email == user_data.email))
     user = query.scalar_one_or_none()
     
     if user is not None:
-        raise HTTPException(status_code=400, detail="user already exists")
+        # Anti-enumeration (S4): respond identically to a successful
+        # registration instead of revealing the email is taken.
+        return {"message": "user created successfully"}
 
     # single transaction: user + default preset + default template all land
     # or none do, so a failure can't leave a half init account. The
@@ -95,7 +100,8 @@ async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=400, detail="user already exists")
+        logger.warning("registration race for %s — email already exists", user_data.email)
+        return {"message": "user created successfully"}
 
     # seed the backward-compat provider rows (Local + OpenRouter, when a key is
     # configured) so a fresh account can chat immediately. Seeding must never

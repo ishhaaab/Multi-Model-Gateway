@@ -82,12 +82,21 @@ CR-17/18/19/20/21/22/23.
 
 #### S4 — Register endpoint allows email enumeration · MEDIUM
 - **Where:** `routers/auth.py:64` `raise HTTPException(400, "user already exists")`.
-- **Fix:** change the duplicate-email response to a constant `400 {"detail":"invalid request"}`.
+- **Fix:** respond identically to a successful registration
+  (`200 {"message":"user created successfully"}`) for both existing and new emails, so a
+  register attempt can't reveal whether an address is taken.
+- **Status: DONE** — `/auth/register` returns the same `200 {"message":"user created
+  successfully"}` for existing and new emails, and the duplicate-email `IntegrityError`
+  race still maps to the same body. See "Security fixes implemented (S4 + S5 + S7)" below.
 
 #### S5 — Rate limiter trusts `X-Forwarded-For` unconditionally · MEDIUM
 - **Where:** `middleware/ratelimit.py:90-92` `_client_ip` takes the first XFF hop always.
-- **Fix:** only trust XFF when the direct peer is in a `TRUSTED_PROXIES` set (default
-  `{"caddy","127.0.0.1"}`); else use `request.client.host`.
+- **Fix:** only trust XFF when the direct peer is in a `TRUSTED_PROXIES` set
+  (comma-separated CIDRs, default `172.16.0.0/12`); else use `request.client.host`.
+- **Status: DONE** — `_client_ip` resolves through `core/trusted_proxies.py::resolve_client_ip`,
+  which trusts the first `X-Forwarded-For` hop only when the direct peer falls inside
+  `settings.trusted_proxy_networks`; an empty `TRUSTED_PROXIES` disables XFF trust entirely.
+  See "Security fixes implemented (S4 + S5 + S7)" below.
 
 #### S6 — MCP_SERVERS stdio spawns arbitrary commands · LOW (trust boundary)
 - **Where:** `services/mcp_client.py:57-62`. Operator-configured via env (RCE-by-config, not
@@ -96,6 +105,9 @@ CR-17/18/19/20/21/22/23.
 #### S7 — Open registration on a tailnet-exposed app · LOW
 - **Where:** `routers/auth.py` `/auth/register` is open.
 - **Fix:** add `REGISTRATION_ENABLED` bool (default true); 403 when false.
+- **Status: DONE** — `REGISTRATION_ENABLED` (default true) gates `/auth/register` with
+  `403 {"detail":"registration disabled"}` when false. See "Security fixes implemented
+  (S4 + S5 + S7)" below.
 
 ### Reliability / correctness
 
@@ -214,9 +226,14 @@ CR-17/18/19/20/21/22/23.
 
 ## Critical files
 - `backend/app/core/config.py:99` — eager `OPENROUTER_API_KEY = get_secret(...)` (S1).
+- `backend/app/core/trusted_proxies.py` — stdlib `resolve_client_ip` (S5): trusts
+  `X-Forwarded-For` only from peers inside `trusted_proxy_networks`.
 - `backend/app/services/agent.py::run_agent` (L88–206) — no `db.close()` (R1) + unbounded
   `messages` (R2).
-- `backend/app/middleware/ratelimit.py::_client_ip` (L87–93) — unconditional XFF trust (S5).
+- `backend/app/middleware/ratelimit.py::_client_ip` — XFF trusted only when the direct peer
+  is in `settings.trusted_proxy_networks` (`TRUSTED_PROXIES`, default `172.16.0.0/12`) (S5).
+- `backend/app/routers/auth.py` — identical register responses for existing/new emails (S4);
+  `REGISTRATION_ENABLED` gate → `403 {"detail":"registration disabled"}` (S7).
 - `backend/app/main.py:66` — `/metrics` gated behind `METRICS_TOKEN` (exact `Authorization:
   Bearer` header; empty token ⇒ 404 fail-closed) (S2).
 - `docker-compose.yml:22` — backend port bound to `127.0.0.1` only (S2).
@@ -228,8 +245,9 @@ CR-17/18/19/20/21/22/23.
   HTTP on :80 by design. If exposed beyond the tailnet, S2/S3 become release blockers and real
   TLS must be added at Caddy.
 - **OpenRouter is optional** (per README + the local-only goal). S1 makes this true in code.
-- **S4/S7 are preferences.** Default: neutralize the register message (cheap); `REGISTRATION_ENABLED`
-  defaults true (no behavior change).
+- **S4/S7 landed with the Phase 1 security pass** (see "Security fixes implemented (S4 + S5 +
+  S7)"): register responses are identical for existing/new emails, and `REGISTRATION_ENABLED`
+  defaults true (no behavior change until the operator flips it).
 - **R3 adds one extra local HTTP call after each answer** (off the response path via `spawn`).
   Fallback: only add `token_provenance` and mark local counts `chunk_count` — honest, no extra
   call.
@@ -363,3 +381,39 @@ The two tailnet-exposure fixes from Phase 1, landed together.
     existing `imgjob:*` check is unchanged.
   - `comfy.get_job_status` now returns relative `/v1/images/file?...` URLs (built with
     `urlencode`); the JSON shape (`status`, `images[].filename`) is unchanged.
+
+## Security fixes implemented (S4 + S5 + S7)
+
+The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 work.
+
+- **S4 — no register enumeration.**
+  - `app/routers/auth.py::register_user` returns the same
+    `200 {"message":"user created successfully"}` whether the email already exists or was
+    just created — the pre-insert `select` no longer raises a distinguishing 400, and the
+    `IntegrityError` race path (two concurrent registers for the same address) returns the
+    same body too. The SPA therefore cannot tell registered from unregistered addresses by
+    response code or body.
+- **S5 — rate limiter honors `X-Forwarded-For` only from trusted proxies.**
+  - `app/middleware/ratelimit.py::_client_ip` now delegates to the stdlib-only helper
+    `app/core/trusted_proxies.py::resolve_client_ip(peer, forwarded, trusted_networks)`:
+    - peer is falsy or unparseable → `"unknown"` (an attacker can't forge a bucket key);
+    - peer falls inside one of the configured `trusted_networks` **and** an
+      `X-Forwarded-For` header is present → the first hop (the original client the trusted
+      proxy saw), whitespace-stripped;
+    - otherwise → the direct peer IP as-is, XFF ignored.
+  - `TRUSTED_PROXIES` (comma-separated CIDRs, default `172.16.0.0/12` — the Docker bridge
+    Caddy sits on) is parsed once per check in `core/config.py::trusted_proxy_networks`;
+    invalid entries are skipped with a warning and an **empty** list means no proxy is
+    trusted at all, so XFF is ignored everywhere.
+  - New unit tests: `backend/tests/test_trusted_proxies.py` (11 cases: trusted/untrusted
+    peers, missing/malformed peer, CIDR membership, empty trusted list).
+- **S7 — `REGISTRATION_ENABLED` signup gate.**
+  - `app/routers/auth.py::register_user` checks `settings.REGISTRATION_ENABLED` first and
+    raises `403 {"detail":"registration disabled"}` when false. `core/config.py` adds the
+    flag with default `true` (no behavior change out of the box).
+  - Lock-down recipe: create your account, set `REGISTRATION_ENABLED=false` in `.env`,
+    restart the backend (see README "Locking down signups").
+- **Setup scripts** (`setup.ps1` Step 2c / `setup.sh` security-defaults block) add
+  `TRUSTED_PROXIES=172.16.0.0/12` and `REGISTRATION_ENABLED=true` to `.env` only when
+  missing — never overwriting a value the operator set deliberately. Both are idempotent:
+  re-running changes nothing when the keys already exist.
