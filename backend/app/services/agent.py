@@ -31,6 +31,7 @@ from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.metrics import record_metrics
 from app.core.background import spawn
+from app.db import AsyncSessionLocal
 from app.models.presets import (
     DEFAULT_TEMPERATURE,
     DEFAULT_TOP_K,
@@ -48,6 +49,69 @@ logger = logging.getLogger(__name__)
 
 def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+def _estimate_tokens(messages: list) -> int:
+    """Rough token estimate for a message list: 4 tokens of overhead per
+    message plus one token per ~4 characters of content. Used to keep the
+    agent payload inside the model's context window (R2)."""
+    total = 0
+    for m in messages:
+        content = str(m.get("content") or "")
+        total += len(content) // 4 + 4
+    return total
+
+
+_CONTEXT_ERROR_HINTS = (
+    "context_length",
+    "context window",
+    "maximum context",
+    "too many tokens",
+    "token limit",
+    "input is too long",
+    "context overflow",
+    "prompt is too long",
+    "context length",
+)
+
+
+def _is_context_error(e: BaseException) -> bool:
+    """True when the provider error reads like the prompt outgrew the model's
+    context window, as opposed to a transient network/rate-limit failure."""
+    text = str(e).lower()
+    return any(hint in text for hint in _CONTEXT_ERROR_HINTS)
+
+
+def _prune_old_tool_rounds(messages: list, max_tokens: int, drop_all: bool = False) -> list:
+    """Drop the oldest tool-call rounds until the estimate fits max_tokens.
+
+    The essential prefix — leading system messages plus the first user
+    message — is never touched. A round's tool results die with the assistant
+    message that made the calls, so the "tool follows the assistant that
+    called it" API invariant holds for whatever survives. Mutates and returns
+    the list."""
+    essential_end = 0
+    for msg in messages:
+        if msg.get("role") in ("system", "user"):
+            essential_end += 1
+            if msg.get("role") == "user":
+                break
+        else:
+            break
+
+    while drop_all or _estimate_tokens(messages) > max_tokens:
+        victim = None
+        for i in range(essential_end, len(messages)):
+            if "tool_calls" in messages[i]:
+                victim = i
+                break
+        if victim is None:
+            break
+        end = victim + 1
+        while end < len(messages) and messages[end].get("role") == "tool":
+            end += 1
+        del messages[victim:end]
+    return messages
 
 
 async def get_allowed_tools(user_id: str, db: AsyncSession) -> list[registry.Tool]:
@@ -110,6 +174,13 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
             "repeat_penalty": preset.repeat_penalty if preset and preset.repeat_penalty and preset.repeat_penalty > 0 else DEFAULT_REPEAT_PENALTY,
         }
 
+        # Release the DB connection back to the pool BEFORE the multi-round loop —
+        # every read is done, and holding an idle connection across the whole run
+        # is what exhausts the pool under concurrency (roadmap R1). Tools and the
+        # final save use their own short-lived sessions; get_db's own close()
+        # afterwards is then a no-op.
+        await db.close()
+
         start_time = time.time()
         prompt_tok = 0
         completion_tok = 0
@@ -122,15 +193,37 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
             offer_tools = bool(tool_schemas) and not over_budget and iteration < settings.AGENT_MAX_ITERATIONS
 
             if offer_tools:
-                resp = await provider.chat_with_tools(
-                    messages=messages,
-                    model=model,
-                    temperature=preset.temperature if preset else DEFAULT_TEMPERATURE,
-                    tools=tool_schemas,
-                    tool_choice="auto",
-                    max_tokens=None,
-                    extra_sampling=extra_sampling if not is_cloud else None,
-                )
+                # keep the payload inside the model's context window: drop the
+                # oldest tool rounds before the call (R2)
+                _prune_old_tool_rounds(messages, int(0.6 * settings.AGENT_TOKEN_BUDGET))
+                try:
+                    resp = await provider.chat_with_tools(
+                        messages=messages,
+                        model=model,
+                        temperature=preset.temperature if preset else DEFAULT_TEMPERATURE,
+                        tools=tool_schemas,
+                        tool_choice="auto",
+                        max_tokens=None,
+                        extra_sampling=extra_sampling if not is_cloud else None,
+                    )
+                except APIError as e:
+                    if not _is_context_error(e):
+                        raise
+                    # the provider rejects the prompt as too long: drop every
+                    # tool round and synthesize from the essential prefix alone
+                    logger.warning(
+                        "context overflow mid-loop; degrading to tool-less final round: %s",
+                        repr(e),
+                    )
+                    truncated = True
+                    _prune_old_tool_rounds(messages, settings.AGENT_TOKEN_BUDGET, drop_all=True)
+                    final_answer = await provider.complete(
+                        messages=messages,
+                        model=model,
+                        temperature=preset.temperature if preset else DEFAULT_TEMPERATURE,
+                        max_tokens=None,
+                    )
+                    break
                 if resp.prompt_tokens is not None:
                     prompt_tok += resp.prompt_tokens
                     completion_tok += resp.completion_tokens or 0
@@ -139,6 +232,7 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
                     final_answer = resp.content or ""
                     break
             else:
+                _prune_old_tool_rounds(messages, settings.AGENT_TOKEN_BUDGET)
                 final_answer = await provider.complete(
                     messages=messages,
                     model=model,
@@ -173,7 +267,11 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
                     # not registered, or registered but not permitted for this user
                     result = f"Error: unknown or unauthorised tool '{name}'"
                 else:
-                    result = await _execute_tool(tool, tc.arguments, ctx)
+                    # the request session was released before the loop (R1); each
+                    # tool gets a short-lived session for its own DB work
+                    async with AsyncSessionLocal() as tool_db:
+                        ctx.db = tool_db
+                        result = await _execute_tool(tool, tc.arguments, ctx)
 
                 yield _sse({"type": "tool_result", "id": tc.id, "name": name, "content": result})
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
@@ -182,7 +280,9 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
             yield _sse({"type": "token", "content": final_answer})
 
         elapsed = time.time() - start_time
-        await save_messages(conversation_id, user_content, final_answer, model, prompt_tok, completion_tok, db)
+        # fresh short-lived session — the request's own connection was released above (R1)
+        async with AsyncSessionLocal() as save_db:
+            await save_messages(conversation_id, user_content, final_answer, model, prompt_tok, completion_tok, save_db)
         # off the response path: embeddings + tracing (metadata-only for private chats)
         spawn(store_exchange_memories(conversation_id, user_content, final_answer))
         spawn(asyncio.to_thread(

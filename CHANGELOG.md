@@ -11,6 +11,10 @@
 - Web SPA — Providers settings screen (BYO-key): list/create/edit/delete/test providers against /v1/providers; masked keys; role + type badges; default + enabled toggles.
 - Web SPA — LoRA Training screen: dataset zip upload, base model/steps/LR/resolution, live SSE progress, cancel, artifact download, sample preview, and a trained-LoRA picker on image generation; backend adds authed GET /v1/trainings/{id}/sample.
 
+## 2026-08-11 — Reliability fixes (R1 + R2)
+
+- Backend — agent loop no longer holds the DB connection for the whole run (R1); agent messages pruned before tool rounds and context-overflow degrades to a tool-less final answer with truncated=True (R2).
+
 ## Earlier work (summary)
 
 - BYO-key provider system + provider routing (Phase 1/1b)

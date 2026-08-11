@@ -117,6 +117,9 @@ CR-17/18/19/20/21/22/23.
 - **Fix:** mirror the chat path: load history up front, `await db.close()`, run the loop holding
   no connection; give each tool its own short-lived `AsyncSessionLocal`; fresh session for
   `save_messages`.
+- **Status: DONE** — `run_agent` closes the request session after the up-front reads and before
+  the loop; each tool runs on a short-lived `AsyncSessionLocal`; `save_messages` uses its own
+  fresh session. See "Reliability fixes implemented (R1 + R2)" below.
 
 #### R2 — Agent `messages` array grows unbounded → context overflow mid-loop · HIGH (CR-7)
 - **Where:** `services/agent.py` — tool results (8k each) appended every round; only
@@ -124,6 +127,10 @@ CR-17/18/19/20/21/22/23.
 - **Fix:** track running prompt tokens; when `> 0.6 * AGENT_TOKEN_BUDGET`, drop oldest
   tool-call/tool-result pairs. Catch `APIError` context-length indicators → degrade to a
   tool-less final synthesis round with `truncated=True`.
+- **Status: DONE** — messages are pruned to `0.6 × AGENT_TOKEN_BUDGET` before every tool round
+  (oldest assistant-with-tool_calls + its tool results go first; the system/user prefix is
+  never touched) and a context-length `APIError` mid-loop degrades to a tool-less final answer
+  with `truncated=True`. See "Reliability fixes implemented (R1 + R2)" below.
 
 #### R3 — Local token counts are fiction · MEDIUM (CR-10)
 - **Where:** `routers/chat.py:155-160` — local path omits `stream_options`, so `prompt_tok=0`,
@@ -228,8 +235,9 @@ CR-17/18/19/20/21/22/23.
 - `backend/app/core/config.py:99` — eager `OPENROUTER_API_KEY = get_secret(...)` (S1).
 - `backend/app/core/trusted_proxies.py` — stdlib `resolve_client_ip` (S5): trusts
   `X-Forwarded-For` only from peers inside `trusted_proxy_networks`.
-- `backend/app/services/agent.py::run_agent` (L88–206) — no `db.close()` (R1) + unbounded
-  `messages` (R2).
+- `backend/app/services/agent.py::run_agent` — closes the request session before the loop (R1)
+  and prunes/degrades on context overflow (R2) — both fixed, see "Reliability fixes
+  implemented (R1 + R2)".
 - `backend/app/middleware/ratelimit.py::_client_ip` — XFF trusted only when the direct peer
   is in `settings.trusted_proxy_networks` (`TRUSTED_PROXIES`, default `172.16.0.0/12`) (S5).
 - `backend/app/routers/auth.py` — identical register responses for existing/new emails (S4);
@@ -422,3 +430,26 @@ The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 wo
   `TRUSTED_PROXIES=172.16.0.0/12` and `REGISTRATION_ENABLED=true` to `.env` only when
   missing — never overwriting a value the operator set deliberately. Both are idempotent:
   re-running changes nothing when the keys already exist.
+
+## Reliability fixes implemented (R1 + R2)
+
+The agent-loop reliability pass from Phase 2, landed together.
+
+- **R1 — the agent loop no longer holds the request's DB connection.**
+  - `services/agent.py::run_agent` closes the request session after the up-front reads
+    (`conversation()`, `load_history()`, `get_allowed_tools()`, `get_provider()`) and before
+    the multi-round loop, mirroring the chat path. No idle connection is held for the run.
+  - Each tool execution gets its own short-lived `AsyncSessionLocal` (`ctx.db` is swapped per
+    call); the unknown/unauthorised-tool branch needs no session. `save_messages` uses a fresh
+    `AsyncSessionLocal` after the loop; `get_db`'s own close afterwards is a no-op.
+- **R2 — messages are bounded and context overflow degrades.**
+  - New pure helpers in `services/agent.py`: `_estimate_tokens` (≈ 4 tokens/message + 1 per 4
+    chars), `_is_context_error` (provider-error string sniffing), `_prune_old_tool_rounds`
+    (drops the oldest assistant-with-tool_calls message plus its tool results until the
+    estimate fits; leading system messages + the first user message are never touched).
+  - The loop prunes to `0.6 × AGENT_TOKEN_BUDGET` before every tool round, and to the full
+    budget before the final tool-less round. A context-length `APIError` mid-loop logs a
+    warning, drops all tool rounds, and synthesizes a tool-less final answer with
+    `truncated=True` — the SSE event sequence and done-event shape are unchanged.
+  - New unit tests: `backend/tests/test_agent.py` (7 cases covering the estimate, the error
+    sniffing, and pruning structure).
