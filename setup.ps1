@@ -111,7 +111,8 @@ if (Test-Path $EnvFile) {
     $secretKey = New-RandomToken 64; $pgPassword = New-RandomToken 24; $grafanaPw = New-RandomToken 24
     $lines = Set-EnvLine $lines "SECRET_KEY" $secretKey
     $lines = Set-EnvLine $lines "POSTGRES_PASSWORD" $pgPassword
-    # DB user must match the compose file's hardcoded POSTGRES_USER (ishaab):
+    # User/db must match the POSTGRES_USER / POSTGRES_DB defaults the compose
+    # file now reads from .env (ishaab / llmgateway — added below if missing):
     $lines = Set-EnvLine $lines "DATABASE_URL" "postgresql://ishaab:$pgPassword@postgres/llmgateway"
     $lines = Set-EnvLine $lines "GRAFANA_ADMIN_PASSWORD" $grafanaPw
 
@@ -196,6 +197,28 @@ if ($addedDefaults.Count -gt 0) {
     Write-Info "Added $($addedDefaults -join ', ') to .env."
 } else {
     Write-Info "Security defaults already present in .env (TRUSTED_PROXIES, REGISTRATION_ENABLED left unchanged)."
+}
+
+# --- Step 2d — Postgres credentials (M3) ---
+# docker-compose requires POSTGRES_USER + POSTGRES_DB in .env; add the defaults
+# only when missing, never overwrite a value the operator set deliberately.
+$lines = Get-Content $EnvFile
+$addedPgDefaults = @()
+foreach ($entry in @(
+    @{ Key = "POSTGRES_USER"; Value = "ishaab" }
+    @{ Key = "POSTGRES_DB";   Value = "llmgateway" }
+)) {
+    $re = "^$([regex]::Escape($entry.Key))="
+    if (-not ($lines | Where-Object { $_ -match $re })) {
+        $lines = Set-EnvLine $lines $entry.Key $entry.Value
+        $addedPgDefaults += "$($entry.Key)=$($entry.Value)"
+    }
+}
+if ($addedPgDefaults.Count -gt 0) {
+    [System.IO.File]::WriteAllLines($EnvFile, $lines, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Info "Added $($addedPgDefaults -join ', ') to .env."
+} else {
+    Write-Info "Postgres credentials already present in .env (POSTGRES_USER, POSTGRES_DB left unchanged)."
 }
 
 # --- Step 3 — SkipStart escape hatch ---

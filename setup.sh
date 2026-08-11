@@ -119,7 +119,8 @@ else
     GRAFANA_PW="$(rand_hex 32)"
     set_env "SECRET_KEY" "$SECRET_KEY"
     set_env "POSTGRES_PASSWORD" "$PG_PASSWORD"
-    # User must match the compose file's hardcoded POSTGRES_USER (ishaab):
+    # User/db must match the POSTGRES_USER / POSTGRES_DB defaults the compose
+    # file now reads from .env (ishaab / llmgateway — added below if missing):
     set_env "DATABASE_URL" "postgresql://ishaab:${PG_PASSWORD}@postgres/llmgateway"
     set_env "GRAFANA_ADMIN_PASSWORD" "$GRAFANA_PW"
 
@@ -188,6 +189,19 @@ ok "Wrote monitoring/metrics_token (matches METRICS_TOKEN)."
 # Add TRUSTED_PROXIES + REGISTRATION_ENABLED only when missing; never
 # overwrite a value the user set deliberately.
 for kv in "TRUSTED_PROXIES=172.16.0.0/12" "REGISTRATION_ENABLED=true"; do
+    key="${kv%%=*}"
+    if ! grep -q "^${key}=" "$ENV_FILE"; then
+        set_env "$key" "${kv#*=}"
+        info "Added $kv to .env."
+    else
+        info "$key already present in .env (left unchanged)."
+    fi
+done
+
+# ------------------------------------- postgres credentials (M3)
+# docker-compose requires POSTGRES_USER + POSTGRES_DB in .env; add the defaults
+# only when missing, never overwrite a value the operator set deliberately.
+for kv in "POSTGRES_USER=ishaab" "POSTGRES_DB=llmgateway"; do
     key="${kv%%=*}"
     if ! grep -q "^${key}=" "$ENV_FILE"; then
         set_env "$key" "${kv#*=}"

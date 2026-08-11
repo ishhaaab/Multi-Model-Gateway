@@ -28,6 +28,12 @@ The backend now supports **bring-your-own-key providers** — user-configured pr
 encrypted keys, routed through the same chat/agent/research paths with a legacy env-var
 fallback. The contract additions the mobile app must handle:
 
+- **Convo ownership errors normalized (D1):** `GET/PATCH/DELETE /v1/convo/{id}` now all go
+  through the same ownership helper — 404 when the conversation doesn't exist and 403 when it
+  belongs to another user. Status codes are unchanged; the 404 detail string for
+  `GET /v1/convo/{id}` changed from `"conversation not found"` to `"convo not found"` — treat
+  both statuses generically and don't match on detail strings.
+
 - **New endpoints (plain JSON CRUD, no SSE):**
   - `GET /v1/providers` — list this user's providers (seeds the default env-based rows on
     first visit if none exist).

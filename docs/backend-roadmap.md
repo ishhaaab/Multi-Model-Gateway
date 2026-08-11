@@ -101,6 +101,9 @@ CR-17/18/19/20/21/22/23.
 #### S6 — MCP_SERVERS stdio spawns arbitrary commands · LOW (trust boundary)
 - **Where:** `services/mcp_client.py:57-62`. Operator-configured via env (RCE-by-config, not
   remote). Document in `.env.example`; never let user input reach `MCP_SERVERS`.
+- **Status: DONE** — README (env-var table row + "MCP trust boundary" note) and `.env.example`
+  now warn that `MCP_SERVERS` is operator-configured, can spawn arbitrary commands (a stdio
+  entry runs whatever `command` names), and must never be derived from user input.
 
 #### S7 — Open registration on a tailnet-exposed app · LOW
 - **Where:** `routers/auth.py` `/auth/register` is open.
@@ -162,10 +165,19 @@ CR-17/18/19/20/21/22/23.
 
 - **D1 — non-owner returns 403, not 404 (enumeration).** `routers/convo.py` — route through
   `_get_owned_conversation` (which 404s).
+  - **Status: DONE** — `messages_get`/`convo_rename`/`convo_delete` now all route through
+    `_get_owned_conversation`, keeping the ownership invariant: 404 when the conversation is
+    missing, 403 when it belongs to someone else (UUIDs are unguessable, so there is no
+    enumeration leak).
 - **D2 — `/openrouter/models` no timeout + `Bearer None`.** Add `timeout=10`; 503 when key
   unset.
+  - **Status: DONE** — `httpx.AsyncClient(timeout=10)` added; the 503-when-key-unset guard is
+    unchanged.
 - **D3 — Memories migration can't downgrade.** `alembic/versions/4b602081a1e1` `downgrade()` is
   `pass` → `op.execute('DROP TABLE IF EXISTS memories CASCADE')`.
+  - **Status: DONE** — downgrade drops the `memories` table
+    (`DROP TABLE IF EXISTS memories CASCADE`), mirroring the upgrade's FK to
+    `conversations.id` with `ondelete='CASCADE'`. Verified in `4b602081a1e1_add_memories_table.py`.
 - **D4 — No pagination on list endpoints.** Add `limit`/`offset` to `GET /convo`, `/presets`,
   `/templates`.
 
@@ -174,8 +186,14 @@ CR-17/18/19/20/21/22/23.
 - **M1 — Dependencies unpinned (MED-7).** `pip-compile` and pin all versions.
 - **M2 — Stale Gemini references.** `.env.example` + README list `GEMINI_*` but no Gemini
   provider exists. Remove.
+  - **Status: DONE** — `GEMINI_MODEL`/`GEMINI_API_KEY` removed from `.env.example`; a
+    case-insensitive repo grep finds no `GEMINI_*` env references. The `google` BYO-key
+    provider type (README "Adding providers") is a real adapter and is kept.
 - **M3 — Hardcoded Postgres user/DB (HIGH-1).** `${POSTGRES_USER:?}` / `${POSTGRES_DB:?}` from
   `.env`.
+  - **Status: DONE** — docker-compose reads `POSTGRES_USER`/`POSTGRES_DB` from `.env`
+    (required); `setup.ps1`/`setup.sh` add the defaults (`ishaab`/`llmgateway`) when missing
+    without overwriting existing values; README env-var table documents both.
 - **M4 — No CI schema-drift guard (CR-22).** CI: `alembic upgrade head` on scratch DB, boot app,
   assert empty autogenerate diff.
 
@@ -207,7 +225,7 @@ CR-17/18/19/20/21/22/23.
 12. **R3** — honest local token counts (`token_provenance` column + tokenize call).
 
 ### Phase 3 — Data integrity
-13. **D1** — uniform 404 for non-owned resources.
+13. **D1** — route conversation ownership through `_get_owned_conversation` (404 missing / 403 foreign — UUIDs unguessable, no enumeration leak).
 14. **D4** — pagination on list endpoints.
 15. **R7** — expired-token sweep (arq cron).
 16. **D3** — memories migration downgrade.

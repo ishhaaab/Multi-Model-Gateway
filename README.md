@@ -267,7 +267,9 @@ Auto HTTPS is disabled. The frontend should call `/api/v1/*` and Caddy will forw
 | `COMFY_URL` | No | ComfyUI base URL for image generation (default: `http://host.docker.internal:8188`) |
 | `OPENROUTER_API_KEY` | No | OpenRouter API key |
 | `OPENROUTER_DEFAULT_MODEL` | No | Default OpenRouter model |
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `POSTGRES_USER` | Yes | PostgreSQL user, required by docker-compose (default `ishaab`; the setup scripts add it to `.env` if missing). Must match the user embedded in `DATABASE_URL` |
+| `POSTGRES_DB` | Yes | PostgreSQL database name, required by docker-compose (default `llmgateway`; the setup scripts add it to `.env` if missing). Must match the database embedded in `DATABASE_URL` |
+| `DATABASE_URL` | Yes | PostgreSQL connection string (user/db must match `POSTGRES_USER` / `POSTGRES_DB`) |
 | `POSTGRES_PASSWORD` | Yes | PostgreSQL password, required by docker-compose (and embedded in `DATABASE_URL`) |
 | `REDIS_URL` | Yes | Redis connection string |
 | `SECRET_KEY` | Yes | JWT signing secret |
@@ -278,9 +280,15 @@ Auto HTTPS is disabled. The frontend should call `/api/v1/*` and Caddy will forw
 | `METRICS_TOKEN` | No | Bearer token for `GET /metrics`; empty disables the endpoint (fail-closed). The setup scripts generate one and mirror it to `monitoring/metrics_token` for Prometheus |
 | `TRUSTED_PROXIES` | No | Comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` header the rate limiter trusts (default `172.16.0.0/12` — the Docker bridge Caddy sits on). Set to empty to ignore `X-Forwarded-For` entirely |
 | `REGISTRATION_ENABLED` | No | Set `false` to disable open signups — `POST /auth/register` returns 403 "registration disabled" (default `true`) |
+| `MCP_SERVERS` | No | JSON list of MCP servers (stdio/SSE) the agent can call. **Operator-configured only — it can spawn arbitrary commands; never let user input reach this setting** |
 | `LANGFUSE_PUBLIC_KEY` | No | Langfuse Cloud public key |
 | `LANGFUSE_SECRET_KEY` | No | Langfuse Cloud secret key |
 | `LANGFUSE_BASE_URL` | No | Langfuse endpoint |
+
+> **MCP trust boundary:** `MCP_SERVERS` is operator configuration — a stdio entry runs
+> whatever `command` it names, so treat the setting like a Dockerfile: trusted config
+> only. Never derive it from, or let it be influenced by, user input (a chat message
+> must never be able to add or alter an MCP server).
 
 ---
 

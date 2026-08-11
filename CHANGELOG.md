@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-11 — Backend cleanup (D1–D3, M2–M3, S6)
+
+- Backend cleanup: unified convo ownership checks (D1); OpenRouter models list timeout (D2); memories migration downgrade (D3); removed stale Gemini references (M2); parameterized POSTGRES_USER/POSTGRES_DB (M3); documented MCP_SERVERS operator-trust boundary (S6).
+
 ## 2026-08-11 — Security hardening (S2–S7)
 
 - S2: /metrics gated behind METRICS_TOKEN (Bearer; 404 when unset); backend port bound to 127.0.0.1

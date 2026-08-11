@@ -24,7 +24,7 @@ async def list_openrouter_models(user_id: str = Depends(get_current_user)):
     api_key = get_openrouter_api_key()
     if not api_key:
         raise HTTPException(status_code=503, detail="OpenRouter is not configured")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10) as client:
         response = await client.get(
             "https://openrouter.ai/api/v1/models",
             headers={"Authorization": f"Bearer {api_key}"}

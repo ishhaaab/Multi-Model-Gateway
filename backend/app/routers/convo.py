@@ -43,15 +43,10 @@ async def convo_get(db: AsyncSession = Depends(get_db), user_id= Depends(securit
 # get the messages from a specific conversation
 @router.get("/convo/{convo_id}")
 async def messages_get(convo_id: str, db: AsyncSession = Depends(get_db), user_id= Depends(security.get_current_user) ):
-    convo_result = await db.execute(select(Conversation).where(Conversation.id == convo_id))
-    conversation = convo_result.scalar_one_or_none()
+    # ownership gate only (404 missing / 403 foreign); the messages query
+    # below does its own filtering
+    await _get_owned_conversation(convo_id, user_id, db)
 
-    if conversation is None:
-        raise HTTPException(status_code=404, detail="conversation not found")
-
-    if str(conversation.user_id) != str(user_id):
-        raise HTTPException(status_code=403, detail="unauthorised user")
-    
     # explicit ordering as postgres gives no guarantee without it, and the
     # chat history must render in exchange order
     messages_result = await db.execute(
@@ -65,15 +60,8 @@ async def messages_get(convo_id: str, db: AsyncSession = Depends(get_db), user_i
 # rename the conversation title
 @router.patch("/convo/{convo_id}")
 async def convo_rename(convo_id: str, convo_data: ConvoRename, db: AsyncSession= Depends(get_db), user_id= Depends(security.get_current_user)):
-    query= await db.execute(select(Conversation).where(Conversation.id== convo_id))
-    conversation= query.scalar_one_or_none()
-    
-    if conversation is None:
-        raise HTTPException(status_code=404, detail= "convo not found")
-    
-    if str(conversation.user_id) != str(user_id):
-        raise HTTPException(status_code= 403, detail= "unauthorised user")
-    
+    conversation = await _get_owned_conversation(convo_id, user_id, db)
+
     conversation.title= convo_data.title
     await db.commit()
     return {"message": "conversation renamed"}
@@ -82,15 +70,8 @@ async def convo_rename(convo_id: str, convo_data: ConvoRename, db: AsyncSession=
 # remove the conversation from the database
 @router.delete("/convo/{convo_id}")
 async def convo_delete(convo_id: str, db: AsyncSession= Depends(get_db), user_id= Depends(security.get_current_user)):
-    query= await db.execute(select(Conversation).where(Conversation.id== convo_id))
-    conversation= query.scalar_one_or_none()
+    conversation = await _get_owned_conversation(convo_id, user_id, db)
 
-    if conversation is None:
-        raise HTTPException(status_code=404, detail= "convo not found")
-    
-    if str(conversation.user_id) != str(user_id):
-        raise HTTPException(status_code= 403, detail= "unauthorised user")
-    
     await db.delete(conversation)
     await db.commit()
     return {"message": "conversation deleted"}

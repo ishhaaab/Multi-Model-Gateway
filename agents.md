@@ -259,7 +259,7 @@ The roadmap is organized into phases. Highest-priority open items:
 - **R2** (HIGH): Agent `messages` array grows unbounded → context overflow mid-loop.
 - **S4/S5** (MEDIUM): register email enumeration; rate limiter trusts `X-Forwarded-For` unconditionally.
 - **R3–R6** (MEDIUM): fake local token counts; research uses the rewrite model; ComfyUI node-anchor substring matching; DDG silent empty failures.
-- **D1–D4, R7, M1–M4** (minor): 404 vs 403 enumeration, pagination, expired-token sweep, memories migration downgrade, unpinned deps, stale Gemini env references, hardcoded Postgres user, CI schema-drift guard.
+- **D4, R7, M1, M4** (minor): pagination on list endpoints, expired-token sweep, unpinned deps, CI schema-drift guard.
 
 Read `docs/backend-roadmap.md` in full before starting any fix — it contains the exact fix plan, verification steps, and the list of issues.md items that are already fixed (do NOT re-touch: CR-1, CR-2, CR-3/4/5, CR-6, CR-8, CR-9, CR-13, CR-12, HIGH-5, MED-6, MED-1, HIGH-2/4/7/8, MED-4/5/8/9/10/11, DEV-1..12).
 
