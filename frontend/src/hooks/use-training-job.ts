@@ -9,16 +9,30 @@ export interface TrainingLiveProgress {
   message: string;
 }
 
+interface TrainingJobState {
+  jobId: string | null;
+  detail: TrainingJobDetail | null;
+  progress: TrainingLiveProgress | null;
+  streaming: boolean;
+}
+
 /**
  * Loads a training job's full detail (snapshot via GET), then — if the job was
  * passed in as still active (queued/running) — subscribes to its SSE stream for
  * live progress and the final result. Also feeds status/progress back into the
  * jobs-list store so cards update without a refetch.
+ *
+ * State only changes in async callbacks (never synchronously in the effect),
+ * so a jobId swap immediately renders the loading state and a stale job's
+ * events can never overwrite the new job.
  */
 export function useTrainingJob(jobId: string | null, initialStatus?: TrainingStatus) {
-  const [detail, setDetail] = useState<TrainingJobDetail | null>(null);
-  const [progress, setProgress] = useState<TrainingLiveProgress | null>(null);
-  const [streaming, setStreaming] = useState(false);
+  const [state, setState] = useState<TrainingJobState>({
+    jobId,
+    detail: null,
+    progress: null,
+    streaming: false,
+  });
   const patchJob = useTrainingStore((s) => s.patchJob);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -31,11 +45,6 @@ export function useTrainingJob(jobId: string | null, initialStatus?: TrainingSta
     abortRef.current = controller;
 
     (async () => {
-      // Reset to a fresh loading state for this job id.
-      setDetail(null);
-      setProgress(null);
-      setStreaming(false);
-
       let job: TrainingJobDetail;
       try {
         job = await trainingApi.get(jobId);
@@ -43,24 +52,37 @@ export function useTrainingJob(jobId: string | null, initialStatus?: TrainingSta
         return;
       }
       if (cancelled) return;
-      setDetail(job);
+      setState((prev) =>
+        !cancelled && prev.jobId === jobId
+          ? { jobId, detail: job, progress: null, streaming: false }
+          : prev
+      );
 
       // Only stream while the job can still move forward; a terminal snapshot
       // (e.g. after a reload) has nothing left to subscribe to.
       const active = initialStatus === "queued" || initialStatus === "running";
       if (!active || (job.status !== "queued" && job.status !== "running")) return;
 
-      setStreaming(true);
+      setState((prev) =>
+        !cancelled && prev.jobId === jobId ? { ...prev, streaming: true } : prev
+      );
       try {
         for await (const event of trainingApi.stream(jobId, controller.signal)) {
           if (cancelled) break;
           const ev = event as TrainingEvent;
           if (ev.type === "progress") {
-            setProgress({
-              stage: ev.stage ?? job.stage ?? "",
-              progress: ev.progress ?? job.progress ?? 0,
-              message: ev.message ?? "",
-            });
+            setState((prev) =>
+              !cancelled && prev.jobId === jobId
+                ? {
+                    ...prev,
+                    progress: {
+                      stage: ev.stage ?? job.stage ?? "",
+                      progress: ev.progress ?? job.progress ?? 0,
+                      message: ev.message ?? "",
+                    },
+                  }
+                : prev
+            );
             patchJob(jobId, {
               stage: ev.stage ?? null,
               progress: ev.progress ?? 0,
@@ -68,15 +90,18 @@ export function useTrainingJob(jobId: string | null, initialStatus?: TrainingSta
             });
           } else if (ev.type === "done") {
             if (ev.status === "complete") {
-              setDetail((d) =>
-                d
+              setState((prev) =>
+                !cancelled && prev.jobId === jobId && prev.detail
                   ? {
-                      ...d,
-                      status: "complete",
-                      progress: 100,
-                      artifact_filename: ev.artifact_filename ?? null,
+                      ...prev,
+                      detail: {
+                        ...prev.detail,
+                        status: "complete",
+                        progress: 100,
+                        artifact_filename: ev.artifact_filename ?? null,
+                      },
                     }
-                  : d
+                  : prev
               );
               patchJob(jobId, {
                 status: "complete",
@@ -84,18 +109,30 @@ export function useTrainingJob(jobId: string | null, initialStatus?: TrainingSta
                 artifact_filename: ev.artifact_filename ?? null,
               });
             } else {
-              setDetail((d) => (d ? { ...d, status: "cancelled" } : d));
+              setState((prev) =>
+                !cancelled && prev.jobId === jobId && prev.detail
+                  ? { ...prev, detail: { ...prev.detail, status: "cancelled" } }
+                  : prev
+              );
               patchJob(jobId, { status: "cancelled" });
             }
           } else if (ev.type === "error") {
-            setDetail((d) => (d ? { ...d, status: "failed", error: ev.message } : d));
+            setState((prev) =>
+              !cancelled && prev.jobId === jobId && prev.detail
+                ? { ...prev, detail: { ...prev.detail, status: "failed", error: ev.message } }
+                : prev
+            );
             patchJob(jobId, { status: "failed", error: ev.message });
           }
         }
       } catch {
         /* stream closed or aborted */
       } finally {
-        if (!cancelled) setStreaming(false);
+        if (!cancelled) {
+          setState((prev) =>
+            !cancelled && prev.jobId === jobId ? { ...prev, streaming: false } : prev
+          );
+        }
       }
     })();
 
@@ -105,5 +142,8 @@ export function useTrainingJob(jobId: string | null, initialStatus?: TrainingSta
     };
   }, [jobId, initialStatus, patchJob]);
 
-  return { detail, progress, streaming };
+  if (state.jobId !== jobId) {
+    return { detail: null, progress: null, streaming: false };
+  }
+  return { detail: state.detail, progress: state.progress, streaming: state.streaming };
 }

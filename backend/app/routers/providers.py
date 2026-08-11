@@ -160,6 +160,18 @@ async def update_provider(
     provider = await _get_owned_provider(db, provider_id, user_id)
 
     data = request.model_dump(exclude_none=True)
+
+    # Validate against the provider's effective state after the patch: switching
+    # an existing provider to openai_compatible (or clearing its base_url while
+    # it stays openai_compatible) must not leave it without a base_url.
+    eff_type = data.get("type") or provider.type
+    eff_base_url = data.get("base_url") if "base_url" in data else provider.base_url
+    if eff_type == "openai_compatible" and not (eff_base_url and eff_base_url.strip()):
+        raise HTTPException(
+            status_code=422,
+            detail="base_url is required for openai_compatible providers",
+        )
+
     if "api_key" in data:
         data["api_key_encrypted"] = crypto.encrypt_secret(data.pop("api_key"))
     if data.get("is_default"):

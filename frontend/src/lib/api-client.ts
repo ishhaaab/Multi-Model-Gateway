@@ -150,7 +150,9 @@ class ApiClient {
    *
    * `<img src>` can't send headers, so the backend's relative `/v1/images/file?`
    * URLs are fetched here and rendered via blob URLs. Mirrors request()'s
-   * 401-refresh-retry so expired sessions recover transparently.
+   * 401-refresh-retry so expired sessions recover transparently, but treats
+   * every 401 as an auth failure — with no refresh token there's nothing to
+   * recover from, so we sign out instead of falling through as a plain error.
    */
   async fetchBlob(
     path: string,
@@ -161,11 +163,22 @@ class ApiClient {
 
     let response = await this.rawFetch(url, "GET", headers, undefined, signal);
 
-    if (response.status === 401 && this.getRefreshToken()) {
-      const refreshed = await this.tryRefreshToken();
-      if (refreshed) {
-        headers = this.buildHeaders(undefined, false);
-        response = await this.rawFetch(url, "GET", headers, undefined, signal);
+    if (response.status === 401) {
+      if (this.getRefreshToken()) {
+        const refreshed = await this.tryRefreshToken();
+        if (refreshed) {
+          headers = this.buildHeaders(undefined, false);
+          response = await this.rawFetch(url, "GET", headers, undefined, signal);
+          // A retried request that STILL 401s means the refreshed session is
+          // not accepted — treat it as session expiry rather than a plain error.
+          if (response.status === 401) {
+            this.onAuthFailure();
+            throw new ApiError(401, "Session expired. Please log in again.");
+          }
+        } else {
+          this.onAuthFailure();
+          throw new ApiError(401, "Session expired. Please log in again.");
+        }
       } else {
         this.onAuthFailure();
         throw new ApiError(401, "Session expired. Please log in again.");
