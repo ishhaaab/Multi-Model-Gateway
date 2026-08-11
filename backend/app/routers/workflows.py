@@ -9,6 +9,7 @@ import uuid
 from app.db import get_db
 from app.core.security import get_current_user
 from app.models.workflows import Workflow
+from app.services.comfy import validate_workflow_anchors
 
 router = APIRouter()
 
@@ -56,6 +57,11 @@ async def create_workflow(
     user_id: str = Depends(get_current_user),
 ):
     _validate_graph(request.graph)
+    try:
+        # R5: critical anchors must be unambiguous unless param_map pins them
+        validate_workflow_anchors(request.graph, request.param_map)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     workflow = Workflow(
         id=uuid.uuid4(),
         user_id=user_id,
@@ -111,6 +117,15 @@ async def update_workflow(
     data = request.model_dump(exclude_none=True)
     if "graph" in data:
         _validate_graph(data["graph"])
+        try:
+            # R5: same anchor check as create — an update can't make a graph
+            # ambiguous either. Validate against the EFFECTIVE post-update
+            # param_map: a graph-only update keeps the stored param_map, which
+            # may be what pins the (now ambiguous) anchors.
+            effective_param_map = data.get("param_map", workflow.param_map)
+            validate_workflow_anchors(data["graph"], effective_param_map)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
     for key, value in data.items():
         setattr(workflow, key, value)
 

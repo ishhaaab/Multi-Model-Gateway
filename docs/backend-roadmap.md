@@ -139,24 +139,44 @@ CR-17/18/19/20/21/22/23.
 - **Where:** `routers/chat.py:155-160` — local path omits `stream_options`, so `prompt_tok=0`,
   `completion_tok=chunk count`.
 - **Fix:** after the local stream, call LM Studio `/v1/tokenize/encode` for the prompt (off the
-  response path via `spawn`). Store `token_provenance` (`exact`|`estimated`|`chunk_count`) on
+  response path via `spawn`). Store `token_provenance` (`exact`|`chunk_count`|`null`) on
   `messages`.
+- **Status: DONE** — `messages.token_provenance` (`exact` | `chunk_count` | null, migration
+  `f3a9c1d5e7b2`) tags how `tokens_used` was derived; the chat path computes it from whether
+  the provider reported usage and spawns `services/tokenize.py::sync_local_token_counts` on
+  the local path to overwrite the last exchange with exact LM Studio counts; the agent path
+  tags the same provenance from provider usage. See "Reliability fixes implemented (R3–R6)"
+  below.
 
 #### R4 — Deep research silently uses the SDXL rewrite model · MEDIUM (CR-14)
 - **Where:** `services/research.py::_pick_client` — falls back to `LM_DEFAULT_MODEL` when no
   OpenRouter and no `LM_CHAT_MODEL`. `job.model` stored as `"auto"`.
 - **Fix:** require a capable chat model: reject at submit (503) if none configured. Resolve the
   model in the router and store it on `job.model`.
+- **Status: DONE** — `services/research.py::resolve_research_model` computes the `(role,
+  model)` pair research will run on (mirroring `_pick_provider` without constructing
+  providers); `routers/research.py` stores the resolved pair on the job and returns 503
+  "no capable chat model configured for research" when nothing resolves. See "Reliability
+  fixes implemented (R3–R6)" below.
 
 #### R5 — ComfyUI node anchor matched by substring · MEDIUM (CR-15)
 - **Where:** `services/comfy.py::_find_node` — `if class_substr in node.get("class_type","")`.
 - **Fix:** for critical anchors (`KSampler`, `ResolutionSelector`, `*LatentImage`), refuse to
   guess if >1 match; require `param_map` for ambiguous anchors. Error at workflow upload.
+- **Status: DONE** — `validate_workflow_anchors` rejects ambiguous workflows at upload/update
+  (422) unless `param_map` pins the intended node; `inject_params` auto-detects with exact
+  matching and skips (never guesses) when an anchor is missing or ambiguous; `inject_lora`
+  anchors only on an exact `KSampler` (a KSamplerAdvanced-only graph gets no LoRA). See
+  "Reliability fixes implemented (R3–R6)" below.
 
 #### R6 — DuckDuckGo scraper fails silently to empty · MEDIUM (CR-16)
 - **Where:** `services/search.py::_duckduckgo` — 200 with no matches returns `[]` silently.
 - **Fix:** on 200 + empty `titles`, log a warning + emit a `search_degraded_total` counter.
   Change the tool's empty-result text to "degraded; answer from prior knowledge."
+- **Status: DONE** — `_duckduckgo` and `_searxng` log a warning and increment
+  `search_degraded_total{source="duckduckgo"|"searxng"}` on a 200 with zero results; the
+  `web_search` tool returns "Search returned no results (degraded); answer from prior
+  knowledge." See "Reliability fixes implemented (R3–R6)" below.
 
 #### R7 — No background sweep of expired refresh tokens · LOW (MED-2)
 - **Fix:** arq cron job hourly: `DELETE FROM refresh_tokens WHERE expires_at < now()`.
@@ -256,6 +276,16 @@ CR-17/18/19/20/21/22/23.
 - `backend/app/services/agent.py::run_agent` — closes the request session before the loop (R1)
   and prunes/degrades on context overflow (R2) — both fixed, see "Reliability fixes
   implemented (R1 + R2)".
+- `backend/app/services/tokenize.py::sync_local_token_counts` — off-path exact token counts
+  for local exchanges via LM Studio `/v1/tokenize/encode` (R3); `messages.token_provenance`
+  records how counts were derived (migration `f3a9c1d5e7b2`).
+- `backend/app/services/research.py::resolve_research_model` — resolves the research
+  (role, model) at submit; `routers/research.py` stores it on the job and 503s when no
+  capable model exists (R4).
+- `backend/app/services/comfy.py::validate_workflow_anchors` + `_find_node_exact` — ambiguous
+  workflows rejected at upload, auto-injection never guesses (R5).
+- `backend/app/services/search.py` — 200-with-zero-results logs a warning and increments
+  `search_degraded_total` (R6).
 - `backend/app/middleware/ratelimit.py::_client_ip` — XFF trusted only when the direct peer
   is in `settings.trusted_proxy_networks` (`TRUSTED_PROXIES`, default `172.16.0.0/12`) (S5).
 - `backend/app/routers/auth.py` — identical register responses for existing/new emails (S4);
@@ -471,3 +501,59 @@ The agent-loop reliability pass from Phase 2, landed together.
     `truncated=True` — the SSE event sequence and done-event shape are unchanged.
   - New unit tests: `backend/tests/test_agent.py` (7 cases covering the estimate, the error
     sniffing, and pruning structure).
+
+## Reliability fixes implemented (R3–R6)
+
+The Phase 2 reliability follow-ups (CR-10/14/15/16), landed together.
+
+- **R3 — honest local token counts.**
+  - `models/messages.py` adds `token_provenance` (`String(16)`, nullable — `exact` |
+    `chunk_count` | `null`; migration `f3a9c1d5e7b2`), recording how `tokens_used` was
+    derived. `save_messages` takes a `token_provenance` keyword and sets it on the assistant
+    message.
+  - `routers/chat.py::stream_tokens` computes `provenance = "exact" if prompt_tok > 0 else
+    "chunk_count"` (cloud reports usage; local leaves it 0) and, on the LOCAL path only,
+    spawns `services/tokenize.py::sync_local_token_counts(conversation_id, user_content,
+    full_response)` after saving. The sync POSTs the user + assistant texts to
+    `{LM_URL}/v1/tokenize/encode` (timeout 15, tolerant of `{"count": N}` and `{"length": N}`
+    responses), then on a fresh session overwrites the last two messages — assistant
+    `tokens_used` set to the completion count, both `token_provenance = "exact"`. Any error
+    logs a warning and leaves the chunk_count values in place (counts are auxiliary, never a
+    request failure).
+  - `services/agent.py::run_agent` computes the same provenance from whether any round
+    reported usage and passes it to `save_messages`.
+- **R4 — honest research model.**
+  - New `services/research.py::resolve_research_model(provider_arg, user_id, db)` computes
+    the `(role, model)` pair research will run on, mirroring `_pick_provider`'s precedence
+    without constructing providers: `"openrouter"`→cloud, `"local"`→local, else cloud when
+    `OPENROUTER_DEFAULT_MODEL` is set; a configured default row wins; the legacy env fallback
+    needs an OpenRouter key for cloud and uses `LM_CHAT_MODEL or LM_DEFAULT_MODEL` for local.
+    Returns `None` when no model string resolves.
+  - `routers/research.py::create_research` resolves before enqueueing: `None` → 503
+    "no capable chat model configured for research"; otherwise the job is stored with
+    `provider = resolved_role` and `model = resolved_model` (the worker's `_pick_provider`
+    then just uses the stored model). `request.model` no longer lands as `"auto"` on the job.
+- **R5 — strict ComfyUI anchors.**
+  - `services/comfy.py` adds `_find_node_exact` (exact `class_type` equality) and
+    `validate_workflow_anchors(graph, param_map)`: raises `ValueError` when a critical anchor
+    pattern (KSampler/KSamplerAdvanced family, `ResolutionSelector`, `*LatentImage`) has more
+    than one match and `param_map` doesn't target one of the matched node ids.
+  - `inject_params` auto-detection now requires EXACTLY one exact match per anchor
+    (`KSampler` equality, `ResolutionSelector` equality, `endswith("LatentImage")`); 0 or >1
+    matches means that param is left unset unless `param_map` overrides it — no guessing.
+    `param_map` priority is unchanged (applied after auto-detect).
+  - `inject_lora` anchors on an exact `KSampler` only — a KSamplerAdvanced-only graph logs
+    and skips instead of getting a silent LoRA splice.
+  - `routers/workflows.py` create + update call `validate_workflow_anchors` and translate
+    `ValueError` → `HTTPException(422, str(e))`.
+- **R6 — search degradation is surfaced.**
+  - `core/metrics.py` adds `search_degraded_total` (Counter, `["source"]`). `_duckduckgo`
+    and `_searxng` log a warning and increment it (source `"duckduckgo"`/`"searxng"`) when a
+    200 response yields zero results.
+  - `services/tools/web_search.py` empty-result text is now "Search returned no results
+    (degraded); answer from prior knowledge." — the model is told the search degraded instead
+    of pretending it found nothing.
+- **Tests:** `backend/tests/test_comfy.py` grows 8 cases: base workflow passes validation;
+  KSampler + KSamplerAdvanced raises without `param_map` and passes with it; multiple latent
+  nodes raise; `inject_params` leaves `batch_size` unset on ambiguous latent graphs; a
+  KSamplerAdvanced-only graph gets no LoRA injection; `param_map` still beats auto-detect.

@@ -280,9 +280,12 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
             yield _sse({"type": "token", "content": final_answer})
 
         elapsed = time.time() - start_time
+        # prompt_tok accumulates only when a resp reported usage (provider
+        # exact); a local run without usage stays 0 → cumulative chunk counts
+        provenance = "exact" if prompt_tok > 0 else "chunk_count"
         # fresh short-lived session — the request's own connection was released above (R1)
         async with AsyncSessionLocal() as save_db:
-            await save_messages(conversation_id, user_content, final_answer, model, prompt_tok, completion_tok, save_db)
+            await save_messages(conversation_id, user_content, final_answer, model, prompt_tok, completion_tok, save_db, token_provenance=provenance)
         # off the response path: embeddings + tracing (metadata-only for private chats)
         spawn(store_exchange_memories(conversation_id, user_content, final_answer))
         spawn(asyncio.to_thread(

@@ -118,6 +118,49 @@ def _find_all_nodes(graph, class_substr: str) -> list[str]:
     return [node_id for node_id, node in graph.items()
             if class_substr in node.get("class_type", "")]
 
+# exact equality variant of _find_node — critical anchors must never be matched
+# by substring, or a KSamplerAdvanced gets silently treated as a KSampler (R5)
+def _find_node_exact(graph, class_name: str) -> tuple[str | None, dict | None]:
+    for node_id, node in graph.items():
+        if node.get("class_type", "") == class_name:
+            return node_id, node
+    return None, None
+
+
+# Anchor patterns that MUST be unambiguous at generation time: auto-injection
+# can only target one node per parameter, so a graph with more than one
+# candidate needs an explicit param_map or the wrong node gets the values.
+# KSampler and KSamplerAdvanced are the same anchor family — a graph with both
+# can't be auto-injected safely either.
+_CRITICAL_ANCHOR_PATTERNS = (
+    ("KSampler", lambda ct: ct in ("KSampler", "KSamplerAdvanced")),
+    ("ResolutionSelector", lambda ct: ct == "ResolutionSelector"),
+    ("LatentImage", lambda ct: ct.endswith("LatentImage")),
+)
+
+
+def validate_workflow_anchors(graph: dict, param_map: dict | None) -> None:
+    """Raise ValueError when a critical anchor pattern has more than one match
+    and param_map doesn't explicitly target one of the matched node ids.
+
+    Called at workflow upload/update so ambiguity is caught before a user ever
+    generates from the graph; the 422 tells them to set param_map.
+    """
+    mapped_node_ids = {
+        target[0]
+        for target in (param_map or {}).values()
+        if isinstance(target, (list, tuple)) and len(target) >= 1
+    }
+    for label, matcher in _CRITICAL_ANCHOR_PATTERNS:
+        matches = [nid for nid, node in graph.items()
+                   if matcher(node.get("class_type", ""))]
+        if len(matches) > 1 and not mapped_node_ids.intersection(matches):
+            raise ValueError(
+                f"ambiguous '{label}' anchors: {len(matches)} nodes match "
+                f"({', '.join(sorted(matches))}); set param_map to target the "
+                "intended node"
+            )
+
 def inject_params(
     graph: dict,
     param_map: dict | None = None,
@@ -134,10 +177,16 @@ def inject_params(
     g= copy.deepcopy(graph)
     targets= {}
 
-    # auto-detect: to figure out which node + input each param maps to
-    # Anchor on the sampler; steps/cfg/seed sit right on it.
-    sampler_id, sampler = _find_node(g, "KSampler")
-    if sampler:
+    # auto-detect: to figure out which node + input each param maps to.
+    # Anchor on the sampler; steps/cfg/seed sit right on it. Exact match only —
+    # a KSamplerAdvanced must never be treated as the KSampler anchor (R5).
+    # With 0 or >1 matches we don't guess: the param stays unset unless
+    # param_map explicitly overrides it.
+    sampler_ids = [nid for nid, node in g.items()
+                   if node.get("class_type", "") == "KSampler"]
+    if len(sampler_ids) == 1:
+        sampler_id = sampler_ids[0]
+        sampler = g[sampler_id]
         s_inputs = sampler["inputs"]
         targets["steps"] = [sampler_id, "steps"]
         targets["cfg"] = [sampler_id, "cfg"]
@@ -150,14 +199,17 @@ def inject_params(
         if "negative" in s_inputs:
             targets["negative"] = [s_inputs["negative"][0], "text"]
 
-    # aspect ratio + batch size have their own nodes 
-    res_id, _ = _find_node(g, "ResolutionSelector")
-    if res_id:
-        targets["aspect_ratio"] = [res_id, "aspect_ratio"]
+    # aspect ratio + batch size have their own nodes; again, don't guess when
+    # the anchor is missing or ambiguous
+    res_ids = [nid for nid, node in g.items()
+               if node.get("class_type", "") == "ResolutionSelector"]
+    if len(res_ids) == 1:
+        targets["aspect_ratio"] = [res_ids[0], "aspect_ratio"]
 
-    latent_id, _ = _find_node(g, "LatentImage")
-    if latent_id:
-        targets["batch_size"] = [latent_id, "batch_size"]
+    latent_ids = [nid for nid, node in g.items()
+                  if node.get("class_type", "").endswith("LatentImage")]
+    if len(latent_ids) == 1:
+        targets["batch_size"] = [latent_ids[0], "batch_size"]
 
     # explicit overrides from the workflow's param_map have priority
     # over auto-detect
@@ -202,7 +254,9 @@ def inject_lora(
             logger.warning("workflow already uses a LoRA node; skipping LoRA injection")
             return graph
 
-        sampler_id, sampler = _find_node(graph, "KSampler")
+        # exact KSampler only (R5) — a KSamplerAdvanced-only graph gets no
+        # LoRA injection, matching the missing-sampler path below
+        sampler_id, sampler = _find_node_exact(graph, "KSampler")
         if sampler is None:
             logger.warning("no KSampler node found; skipping LoRA injection")
             return graph

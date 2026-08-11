@@ -126,7 +126,7 @@ async def load_history(conversation_id: str, query: str, db: AsyncSession) -> li
     return recent
 
 
-async def save_messages(conversation_id: str, user_content: str, assistant_content: str, model: str, prompt_tok, completion_tok, db: AsyncSession):
+async def save_messages(conversation_id: str, user_content: str, assistant_content: str, model: str, prompt_tok, completion_tok, db: AsyncSession, token_provenance: str | None = None):
     # Lock the conversation row for the duration of the transaction so two
     # concurrent sends can't both read the same max(index) and allocate
     # colliding indices (which would corrupt the exchange invariant).
@@ -154,6 +154,7 @@ async def save_messages(conversation_id: str, user_content: str, assistant_conte
         content=assistant_content,
         model_used=model,
         tokens_used= completion_tok,
+        token_provenance=token_provenance,
         index= assistant_index
     )
     db.add(user_msg)
@@ -165,4 +166,5 @@ async def save_messages(conversation_id: str, user_content: str, assistant_conte
     await db.commit()
     # Embeddings are stored by the caller via background.spawn(store_exchange_memories(...))
     # so the Ollama round-trips never sit on the response's critical path.
+    return user_msg, assistant_msg
 

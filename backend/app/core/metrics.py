@@ -40,6 +40,12 @@ tokens_per_second = Gauge(
     ["model"]
 )
 
+search_degraded_total = Counter(
+    "search_degraded_total",
+    "Search calls that returned zero results",
+    ["source"]
+)
+
 
 from langfuse import get_client
 

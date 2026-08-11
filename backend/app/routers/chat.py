@@ -17,6 +17,7 @@ from app.core.exceptions import AppError
 from app.services.convo import conversation, load_history, save_messages, get_last_exchanges, detect_recall_request
 from app.services.memory import store_exchange_memories
 from app.services.router import get_provider, ChatRequest
+from app.services.tokenize import sync_local_token_counts
 
 from app.models.presets import (
     Preset,
@@ -155,14 +156,30 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
     if prompt_tok == 0 and completion_tok == 0:
         completion_tok = token_count
 
+    # prompt_tok > 0 means the provider reported usage (cloud); the local
+    # fallback leaves it 0, so those counts are honest chunk counts. The local
+    # path syncs to exact counts off-path afterwards (see tokenize.py).
+    provenance = "exact" if prompt_tok > 0 else "chunk_count"
+
     # on a mid-stream failure with nothing generated there is no exchange to save
     if full_response or not stream_error:
         # fresh short-lived session — the request's own connection was released above
         async with AsyncSessionLocal() as save_db:
-            await save_messages(conversation_id, user_content, full_response, model, prompt_tok, completion_tok, save_db)
+            user_msg, assistant_msg = await save_messages(conversation_id, user_content, full_response, model, prompt_tok, completion_tok, save_db, token_provenance=provenance)
         # off the response path: embeddings (slow Ollama round-trips) + tracing.
         # record_content=False for private chats so message text never reaches Langfuse (CR-2).
         spawn(store_exchange_memories(conversation_id, user_content, full_response))
+        if not is_cloud:
+            # local counts are chunk_count until LM Studio reports the real
+            # numbers; the sync targets the exact rows saved above and is
+            # best-effort — it never fails the request
+            spawn(sync_local_token_counts(
+                conversation_id,
+                str(user_msg.id),
+                str(assistant_msg.id),
+                user_content,
+                full_response,
+            ))
         spawn(asyncio.to_thread(
             record_metrics, resolved_provider, model, elapsed, prompt_tok, completion_tok,
             messages, full_response, conversation_id, not request.private,

@@ -7,6 +7,7 @@ otherwise DuckDuckGo's HTML endpoint cus no API key needed :).
 import asyncio
 import html as html_lib
 import ipaddress
+import logging
 import re
 import socket
 from urllib.parse import parse_qs, urlsplit
@@ -14,6 +15,9 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 from app.core.config import settings
+from app.core.metrics import search_degraded_total
+
+logger = logging.getLogger(__name__)
 
 # Hard cap on redirect hops we'll follow (each one is re-validated for SSRF).
 _MAX_REDIRECTS = 5
@@ -77,9 +81,14 @@ async def _searxng(query: str, limit: int) -> list[dict]:
             params={"q": query, "format": "json"},
         )
         response.raise_for_status()
+    results = response.json().get("results", [])
+    if not results:
+        # a 200 with zero hits is a degraded search, not a success (R6)
+        logger.warning("SearXNG returned zero results for query '%s'", query)
+        search_degraded_total.labels(source="searxng").inc()
     return [
         {"title": r.get("title", ""), "url": r.get("url", ""), "snippet": r.get("content", "")}
-        for r in response.json().get("results", [])[:limit]
+        for r in results[:limit]
     ]
 
 
@@ -92,6 +101,11 @@ async def _duckduckgo(query: str, limit: int) -> list[dict]:
 
     page = response.text
     titles = _DDG_TITLE_RE.findall(page)
+    if not titles:
+        # 200 with no result links: DDG quietly degraded (rate-limited page,
+        # bot wall, or genuinely nothing) — surface it instead of returning []
+        logger.warning("DuckDuckGo returned zero results for query '%s'", query)
+        search_degraded_total.labels(source="duckduckgo").inc()
     snippets = [_clean(s) for s in _DDG_SNIPPET_RE.findall(page)]
     return [
         {

@@ -12,7 +12,7 @@ from app.core.queue import get_queue
 from app.core.redis import get_redis
 from app.core.security import get_current_user
 from app.models.research_jobs import ResearchJob
-from app.services.research import CANCEL_KEY, CHANNEL
+from app.services.research import CANCEL_KEY, CHANNEL, resolve_research_model
 from app.services.router import Provider
 
 router = APIRouter()
@@ -64,12 +64,20 @@ async def create_research(
     if existing is not None:
         return {"job_id": str(existing.id), "status": existing.status}
 
+    # R4: resolve the concrete role + model at submit time. Research can't
+    # silently fall back to a rewrite model mid-run — with no capable chat
+    # model configured the job is rejected before anything is enqueued.
+    resolved = await resolve_research_model(request.provider.value, user_id, db)
+    if resolved is None:
+        raise HTTPException(status_code=503, detail="no capable chat model configured for research")
+    resolved_role, resolved_model = resolved
+
     job = ResearchJob(
         id=uuid.uuid4(),
         user_id=user_id,
         query=request.query,
-        provider=request.provider.value,
-        model=request.model,
+        provider=resolved_role,
+        model=resolved_model,
         status="queued",
         progress=0,
     )

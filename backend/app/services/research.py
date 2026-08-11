@@ -52,6 +52,54 @@ class ResearchCancelled(Exception):
     pass
 
 
+async def resolve_research_model(provider_arg: str | None, user_id: str, db) -> tuple[str, str] | None:
+    """Best (provider label, model) pair deep research will run on, resolved at
+    submit. The first tuple element is the API provider label — "openrouter" |
+    "local" — the same vocabulary as ResearchRequest.provider, so the router can
+    store it verbatim on the job row and _pick_provider can route on it.
+
+    Internally the "cloud"/"local" role vocabulary is used for get_default_provider
+    lookups; the returned label converts cloud → "openrouter". Mirrors
+    _pick_provider's precedence EXACTLY without constructing a provider:
+    provider_arg "openrouter"→cloud, "local"→local, else cloud when
+    OPENROUTER_DEFAULT_MODEL is configured. A user-configured row for the role
+    wins; with no rows the legacy env-var fallback applies (cloud needs an
+    OpenRouter key; local uses LM_CHAT_MODEL or LM_DEFAULT_MODEL). Returns
+    None when no model string can be resolved — the router rejects the job
+    with 503 so research never silently runs on a random model.
+    """
+    if provider_arg == "openrouter":
+        role = "cloud"
+    elif provider_arg == "local":
+        role = "local"
+    else:  # auto / None: cloud preferred when configured
+        role = "cloud" if settings.OPENROUTER_DEFAULT_MODEL else "local"
+
+    # R4: the returned first element must be the API provider label ("openrouter"
+    # | "local"), not the internal role — the router stores it on job.provider
+    # and _pick_provider routes on it. cloud → "openrouter".
+    label = "openrouter" if role == "cloud" else "local"
+
+    row = await get_default_provider(db, user_id, role)
+    if row is not None:
+        if role == "local":
+            fallback_model = settings.LM_CHAT_MODEL or settings.LM_DEFAULT_MODEL
+        else:
+            fallback_model = settings.OPENROUTER_DEFAULT_MODEL
+        model = row.default_model or fallback_model
+        return (label, model) if model else None
+
+    # legacy env-var fallback: no configured rows for this role
+    if role == "cloud":
+        key = get_openrouter_api_key()
+        if not key:
+            return None  # no cloud model without a key — do NOT fall through to local
+        model = settings.OPENROUTER_DEFAULT_MODEL
+        return (label, model) if model else None
+    model = settings.LM_CHAT_MODEL or settings.LM_DEFAULT_MODEL
+    return (label, model) if model else None
+
+
 async def _pick_provider(job, db) -> tuple[LLMProvider, str]:
     """Research favours the cloud model (long context, many sources) unless
     the job pinned a provider. User-configured rows win; with no rows we fall

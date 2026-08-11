@@ -144,6 +144,23 @@ generate response gains `"lora"` (the filename ComfyUI loaded).
     handling, including the `samplePath`/`artifactPath` helpers and the FormData
     multipart support added to the web `api-client.ts`.
 
+### Research job provider/model now resolved (R4)
+
+`POST /v1/research` no longer stores `provider: "auto"` / `model: "auto"` on the job: the
+backend resolves the concrete role (`local` | `openrouter`) and chat model at submit and
+persists them on the job row, returning **503 "no capable chat model configured for
+research"** when nothing resolves (nothing is enqueued in that case). The response shape
+(`{job_id, status}`) and the research SSE event schema are unchanged — the mobile/web
+research UI may simply show the resolved role/model instead of "auto" when displaying job
+details.
+
+### Chat/agent messages now carry token provenance (R3)
+
+Chat and agent `messages` rows gain a nullable `token_provenance` field (`exact` |
+`chunk_count` | null) describing how `tokens_used` was derived; the local chat path
+additionally syncs exact counts off-path after the response. This is stored metadata —
+the `/v1/chat/completions` and `/v1/agent/chat` SSE wire formats are unchanged.
+
 ## Phases
 
 ### Phase 1 — Scaffold + contract layer + auth

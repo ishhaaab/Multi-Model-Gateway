@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-11 — Reliability fixes (R3–R6)
+
+- Backend — honest local token counts via token_provenance + off-path tokenize sync (R3); research rejects without a capable model and stores the resolved model (R4); strict ComfyUI anchor detection + upload validation (R5); search degradation is surfaced via metric + honest tool text (R6).
+
 ## 2026-08-11 — Backend cleanup (D1–D3, M2–M3, S6)
 
 - Backend cleanup: unified convo ownership checks (D1); OpenRouter models list timeout (D2); memories migration downgrade (D3); removed stale Gemini references (M2); parameterized POSTGRES_USER/POSTGRES_DB (M3); documented MCP_SERVERS operator-trust boundary (S6).

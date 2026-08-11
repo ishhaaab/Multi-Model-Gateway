@@ -16,7 +16,7 @@ async def _web_search(args: dict, ctx: ToolContext) -> str:
 
     results = await search(query)
     if not results:
-        return "No results found."
+        return "Search returned no results (degraded); answer from prior knowledge."
     return json.dumps(results, ensure_ascii=False)
 
 
