@@ -1,5 +1,3 @@
-import { COMFYUI_HOST } from "./config";
-
 /** Tiny classNames joiner (truthy strings/array values only). */
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -67,22 +65,6 @@ export function isTokenExpired(token: string | null, skewSeconds = 30): boolean 
   const exp = payload?.exp;
   if (typeof exp !== "number") return true;
   return Date.now() / 1000 >= exp - skewSeconds;
-}
-
-/**
- * ComfyUI returns image URLs pointing at host.docker.internal:8188, which is
- * only reachable inside Docker. Rewrite the host to the configured COMFYUI_HOST.
- */
-export function getImageDisplayUrl(comfyUrl: string): string {
-  try {
-    const url = new URL(comfyUrl);
-    const base = new URL(COMFYUI_HOST);
-    url.protocol = base.protocol;
-    url.host = base.host;
-    return url.toString();
-  } catch {
-    return comfyUrl;
-  }
 }
 
 export interface ProviderInfo {

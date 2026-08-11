@@ -37,13 +37,15 @@ export default function RegisterPage() {
     setLoading(true);
     try {
       await register(email.trim(), password);
-      toast.success("Account created! Please sign in.");
+      // Backend returns 200 even for already-registered emails (S4), so the
+      // toast must not claim an account was created.
+      toast.success("Please sign in with your credentials.");
       navigate("/login");
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.isNetworkError) setError("Connection failed. Is the server running?");
-        else if (err.statusCode === 400) setError("User already exists.");
-        else setError(err.detail);
+        else if (err.statusCode === 403) setError("Registration is disabled.");
+        else setError("Signup failed — check the address and password.");
       } else {
         setError("Something went wrong. Please try again.");
       }

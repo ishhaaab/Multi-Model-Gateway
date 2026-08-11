@@ -138,6 +138,47 @@ class ApiClient {
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
+  /**
+   * Fetch a binary resource (e.g. an image) with the Authorization header.
+   *
+   * `<img src>` can't send headers, so the backend's relative `/v1/images/file?`
+   * URLs are fetched here and rendered via blob URLs. Mirrors request()'s
+   * 401-refresh-retry so expired sessions recover transparently.
+   */
+  async fetchBlob(
+    path: string,
+    signal?: AbortSignal
+  ): Promise<{ blob: Blob; contentType: string }> {
+    const url = this.fullUrl(path);
+    let headers = this.buildHeaders(undefined, false);
+
+    let response = await this.rawFetch(url, "GET", headers, undefined, signal);
+
+    if (response.status === 401 && this.getRefreshToken()) {
+      const refreshed = await this.tryRefreshToken();
+      if (refreshed) {
+        headers = this.buildHeaders(undefined, false);
+        response = await this.rawFetch(url, "GET", headers, undefined, signal);
+      } else {
+        this.onAuthFailure();
+        throw new ApiError(401, "Session expired. Please log in again.");
+      }
+    }
+
+    if (!response.ok) {
+      const error = await response
+        .json()
+        .catch(() => ({ detail: "Request failed" }));
+      throw new ApiError(response.status, error.detail || "Request failed");
+    }
+
+    return {
+      blob: await response.blob(),
+      contentType:
+        response.headers.get("content-type") || "application/octet-stream",
+    };
+  }
+
   private tryRefreshToken(): Promise<boolean> {
     if (this.refreshInFlight) return this.refreshInFlight;
 

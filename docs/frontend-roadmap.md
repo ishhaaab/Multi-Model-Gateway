@@ -76,6 +76,11 @@ fallback. The contract additions the mobile app must handle:
   (e.g. "Signup failed — check the address and password" / "Registration is disabled").
   Do not surface backend detail strings as account-existence hints, and do not special-case
   a 400 as "email already taken" (that code is no longer emitted by the backend).
+- **Web SPA status: DONE.** `frontend/src/pages/register.tsx` now maps 403 →
+  "Registration is disabled.", falls back to a generic "Signup failed — check the
+  address and password." for every other non-2xx, and shows a neutral success toast
+  ("Please sign in with your credentials.") since a 200 no longer means an account
+  was created. The mobile port must mirror this handling.
 
 ### Training (image LoRA fine-tuning, backend Phase 6)
 
@@ -140,8 +145,10 @@ generate response gains `"lora"` (the filename ComfyUI loaded).
      `streamEvents<T>(method, path, body?, signal?): AsyncGenerator<T>`.
    - Pre-flight token check before opening SSE (RN's `EventSource` doesn't expose HTTP status,
      so no mid-stream 401-retry).
-   - Port `getImageDisplayUrl()`, `aspectRatioShort()`, `formatRelativeTime()`, `isTokenExpired()`,
-     `getProviderInfo()` from `frontend/src/lib/utils.ts`.
+   - Port `aspectRatioShort()`, `formatRelativeTime()`, `isTokenExpired()`,
+     `getProviderInfo()` from `frontend/src/lib/utils.ts`. **Do not port
+     `getImageDisplayUrl()`** — it was deleted from the web app (S3: images are
+     fetched through the authed `/v1/images/file` route, see Phase 3 item 16).
 5. **Port endpoint definitions:** copy `frontend/src/lib/api-endpoints.ts` verbatim (thin
    wrappers around `apiClient.request()`).
 6. **Port Zustand stores:** `auth-store` (SecureStore instead of localStorage), `chat-store`,
@@ -205,6 +212,12 @@ generate response gains `"lora"` (the filename ComfyUI loaded).
     `url` directly (same gateway origin, so the normal Authorization header applies) and
     remove any `/view` URL rewriting — the open Caddy `/view*` proxy is gone, so
     `getImageDisplayUrl()` must not rewrite ComfyUI hosts anymore.
+    - **Web SPA status: DONE.** `frontend/src/components/images/AuthedImage.tsx` fetches
+      bytes through the authed API (with 401-refresh-retry) and renders blob URLs;
+      `lib/authed-image.ts` provides the shared cache + `useResolvedImageUrl` hook, and
+      `getImageDisplayUrl()` has been deleted from `lib/utils.ts`. The mobile port should
+      use the same pattern (RN `Image` supports a `headers` prop, or fetch + blob/base64
+      like the web app).
 
 ### Phase 4 — Settings + config screens
 
@@ -250,8 +263,9 @@ generate response gains `"lora"` (the filename ComfyUI loaded).
 - `frontend/src/lib/api-client.ts:102-167` — 401-refresh-retry + coalescing; ports to RN `fetch`.
 - `frontend/src/hooks/use-chat.ts` + `use-agent.ts` + `use-research-job.ts` — three streaming
   hooks that merge into one mode-dispatching `use-chat.ts`.
-- `frontend/src/lib/utils.ts:76-86` — `getImageDisplayUrl()` (ComfyUI host rewrite; **no
-  longer needed** — see "Image URL fetching (S3 shipped)" in Phase 3).
+- `frontend/src/lib/authed-image.ts` — `resolveImageUrl()` + `useResolvedImageUrl()`
+  (authed blob fetch + cache) and `frontend/src/components/images/AuthedImage.tsx` —
+  the pattern the mobile app should follow for S3-compliant image rendering.
 
 ## Assumptions
 - **`react-native-sse` is the SSE transport** (supports POST + custom headers). Fallback:
@@ -265,7 +279,8 @@ generate response gains `"lora"` (the filename ComfyUI loaded).
   (write research answer as a `Message`) — out of scope here.
 - **Image files are fetched through the authed `/v1/images/file?...` route (S3).**
   The backend returns relative URLs on job status; the app uses them as-is with the
-  normal Authorization header. No `/view` proxying or host rewriting.
+  normal Authorization header. No `/view` proxying or host rewriting. **The web SPA
+  already implements this** — see "Image URL fetching (S3 shipped)" in Phase 3.
 - **Gateway URL is a user-entered setting**, not a build-time env var (no rebuild to change
   URL). Fallback: `EXPO_PUBLIC_GATEWAY_URL` EAS env var if a baked-in URL is preferred.
 - **Android-first; iOS later** (same codebase; iOS build needs Apple Developer credentials).

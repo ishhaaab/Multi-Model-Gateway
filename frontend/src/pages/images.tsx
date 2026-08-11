@@ -20,13 +20,8 @@ import { useImageGeneration } from "@/hooks/use-image";
 import type { CompletedGeneration } from "@/hooks/use-image";
 import type { ImageResult } from "@/lib/types";
 import { imageApi } from "@/lib/api-endpoints";
-import {
-  cn,
-  aspectRatioShort,
-  getImageDisplayUrl,
-  formatRelativeTime,
-  truncate,
-} from "@/lib/utils";
+import { useResolvedImageUrl } from "@/lib/authed-image";
+import { cn, aspectRatioShort, formatRelativeTime, truncate } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
 import { Slider } from "@/components/ui/Slider";
@@ -35,6 +30,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { Spinner } from "@/components/ui/Spinner";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Modal } from "@/components/ui/Modal";
+import AuthedImage from "@/components/images/AuthedImage";
 
 const NEG_DEFAULT = "text, watermark, blurry, low quality";
 
@@ -46,29 +42,32 @@ function ImageCard({
   onFullscreen: (url: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
-  const url = getImageDisplayUrl(image.url);
+  // Blob URL for the download link; the rendered <img> resolves independently
+  // inside AuthedImage (shared cache, so no second fetch).
+  const { resolved } = useResolvedImageUrl(image.url);
 
   return (
     <div className="group relative overflow-hidden rounded-lg border border-border bg-bg-secondary shadow-[0_1px_3px_rgba(0,0,0,0.3)]">
-      <img
-        src={url}
+      <AuthedImage
+        src={image.url}
         alt={image.filename}
-        loading="lazy"
         className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
       />
       <div className="absolute right-2 top-2 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
-        <a
-          href={url}
-          download={image.filename}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex h-8 w-8 items-center justify-center rounded-md bg-black/60 text-white backdrop-blur-sm hover:bg-black/80"
-          title="Download"
-        >
-          <Download size={15} />
-        </a>
+        {resolved ? (
+          <a
+            href={resolved}
+            download={image.filename}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex h-8 w-8 items-center justify-center rounded-md bg-black/60 text-white backdrop-blur-sm hover:bg-black/80"
+            title="Download"
+          >
+            <Download size={15} />
+          </a>
+        ) : null}
         <button
-          onClick={() => onFullscreen(url)}
+          onClick={() => onFullscreen(image.url)}
           className="flex h-8 w-8 items-center justify-center rounded-md bg-black/60 text-white backdrop-blur-sm hover:bg-black/80"
           title="Fullscreen"
         >
@@ -77,7 +76,7 @@ function ImageCard({
         <button
           onClick={async () => {
             try {
-              await navigator.clipboard.writeText(url);
+              await navigator.clipboard.writeText(image.url);
               setCopied(true);
               toast.success("Image URL copied.");
               setTimeout(() => setCopied(false), 1500);
@@ -452,15 +451,14 @@ export default function ImagesPage() {
                   return (
                     <button
                       key={h.promptId + h.createdAt}
-                      onClick={() => thumb && setFullscreen(getImageDisplayUrl(thumb.url))}
+                      onClick={() => thumb && setFullscreen(thumb.url)}
                       className="group flex flex-col gap-1 text-left"
                       title={h.prompt}
                     >
                       {thumb ? (
-                        <img
-                          src={getImageDisplayUrl(thumb.url)}
+                        <AuthedImage
+                          src={thumb.url}
                           alt=""
-                          loading="lazy"
                           className="aspect-square w-full rounded-md border border-border object-cover transition-transform group-hover:scale-[1.03]"
                         />
                       ) : (
@@ -492,7 +490,7 @@ export default function ImagesPage() {
             >
               <X size={18} />
             </button>
-            <img
+            <AuthedImage
               src={fullscreen}
               alt="Generated"
               className="max-h-[80vh] w-auto rounded-lg"

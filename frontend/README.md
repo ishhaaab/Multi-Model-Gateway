@@ -28,7 +28,7 @@ The backend is expected at `http://localhost:2727` (the Docker-mapped port).
 |---|---|---|
 | `VITE_API_URL` | `http://localhost:2727` | Backend base URL |
 | `VITE_API_PREFIX` | `` (empty) | Use `/api` when behind the Caddy reverse proxy |
-| `VITE_COMFYUI_HOST` | `http://localhost:8188` | Rewrites ComfyUI image URLs (which point at `host.docker.internal:8188`) |
+| `VITE_COMFYUI_HOST` | `http://localhost:8188` | Obsolete/ignored for rendering (images are now served via the authed `/v1/images/file` route; kept only for the settings-page display) |
 
 For production behind Caddy, the built frontend is served on port `6969` and the
 API is reached via `/api` — set `VITE_API_PREFIX=/api`.
