@@ -11,13 +11,33 @@ const blobCache = new Map<string, string>();
 export async function resolveImageUrl(path: string): Promise<string> {
   const cached = blobCache.get(path);
   if (cached) return cached;
-  if (!path.startsWith("/v1/images/")) {
+  if (!path.startsWith("/v1/images/") && !path.startsWith("/v1/trainings/")) {
     throw new Error("unresolvable image URL");
   }
   const { blob } = await apiClient.fetchBlob(path);
   const url = URL.createObjectURL(blob);
   blobCache.set(path, url);
   return url;
+}
+
+/**
+ * Download a backend file (e.g. a trained LoRA .safetensors) through the
+ * authed API: fetch as a blob, then trigger a browser download under the
+ * given filename via a temporary anchor.
+ */
+export async function downloadAuthedFile(path: string, filename: string): Promise<void> {
+  const { blob } = await apiClient.fetchBlob(path);
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 interface ResolvedImageState {

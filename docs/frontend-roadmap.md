@@ -104,6 +104,8 @@ image generation. New endpoints:
   channel `train:{id}`; `progress` carries `stage` + 0-100 `progress`; `done` carries
   `artifact_filename` (and `sample_image` when complete).
 - `GET /v1/trainings/{id}/artifact` — downloads the trained `.safetensors`.
+- `GET /v1/trainings/{id}/sample` — authed sample-image preview (404 unless the job is
+  complete and a sample exists; media type guessed from the extension).
 
 **`TrainingJob` summary shape** (list items; detail adds `dataset_dir`, `params`,
 `sample_image`): `id`, `name`, `base_model`, `status` (`queued|running|complete|failed|cancelled`),
@@ -125,6 +127,16 @@ generate response gains `"lora"` (the filename ComfyUI loaded).
     generate; surface the 400/404/409 error strings verbatim.
   - Port the new endpoints into `api-endpoints.ts` / `types.ts`; the SSE stream uses the
     same `streamEvents` helper as research.
+  - **Web SPA status: DONE.** `frontend/src/pages/trainings.tsx` + `components/trainings/TrainingForm.tsx`
+    + `TrainingCard.tsx` + `stores/training-store.ts` + `hooks/use-training-job.ts`
+    implement the full screen — dataset zip upload (multipart via FormData), base model /
+    steps / learning rate / resolution fields, live SSE progress on each job card, cancel,
+    `.safetensors` download (`downloadAuthedFile`), and an authed sample-image preview
+    (`AuthedImage` via the new `GET /v1/trainings/{id}/sample`). The image generation
+    screen now has a **Trained LoRA** dropdown in Advanced Options that sends
+    `ImageRequest.training_id` (completed jobs only). The mobile port must mirror this
+    handling, including the `samplePath`/`artifactPath` helpers and the FormData
+    multipart support added to the web `api-client.ts`.
 
 ## Phases
 

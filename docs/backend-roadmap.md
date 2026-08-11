@@ -315,6 +315,11 @@ Implemented:
   /trainings/{id}/stream` (SSE `{"type":"progress"|"done"|"error"}` relayed from Redis
   pub/sub channel `train:{id}`), and `GET /trainings/{id}/artifact` (downloads the
   `.safetensors`, traversal-guarded).
+- **Authed sample-image endpoint** — `GET /trainings/{id}/sample` mirrors the artifact
+  route: owned-job check (404 for missing/foreign), 404 unless `status == "complete"`
+  and `sample_image` is set, traversal-guarded resolve under the job dir, and a
+  `FileResponse` (media type guessed from the extension). The web SPA renders it via
+  the authed blob-fetch pattern.
 - **Trainer arq worker** (`app/trainer_worker.py` + `services/trainer.py`) — a dedicated
   compose service (`trainer`) built from the `trainer` Dockerfile target, which clones
   ai-toolkit into `/opt/ai-toolkit` and runs `python /opt/ai-toolkit/run.py <config.yaml>`.

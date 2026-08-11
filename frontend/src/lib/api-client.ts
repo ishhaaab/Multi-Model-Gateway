@@ -64,7 +64,9 @@ class ApiClient {
 
   private buildHeaders(body: unknown, stream: boolean): Record<string, string> {
     const headers: Record<string, string> = {};
-    if (body !== undefined && body !== null) {
+    // FormData sets its own multipart Content-Type (with a boundary) — let the
+    // browser fill it in, or the server can't parse the body.
+    if (body !== undefined && body !== null && !(body instanceof FormData)) {
       headers["Content-Type"] = "application/json";
     }
     if (stream) {
@@ -88,7 +90,12 @@ class ApiClient {
       return await fetch(url, {
         method,
         headers,
-        body: body !== undefined && body !== null ? JSON.stringify(body) : undefined,
+        body:
+          body instanceof FormData
+            ? body
+            : body !== undefined && body !== null
+              ? JSON.stringify(body)
+              : undefined,
         signal,
       });
     } catch (err) {

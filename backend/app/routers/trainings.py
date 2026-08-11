@@ -332,3 +332,24 @@ async def get_training_artifact(
         media_type="application/octet-stream",
         filename=job.artifact_filename,
     )
+
+
+@router.get("/trainings/{job_id}/sample")
+async def get_training_sample(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
+):
+    job = await _get_owned_job(job_id, user_id, db)
+    if job.status != "complete" or not job.sample_image:
+        raise HTTPException(status_code=404, detail="sample not available")
+
+    job_dir = (TRAINING_ROOT / str(job.id)).resolve()
+    sample = (job_dir / job.sample_image).resolve()
+    # guard against traversal: the sample must live inside the job's dir
+    if not sample.is_relative_to(job_dir) or not sample.is_file():
+        raise HTTPException(status_code=404, detail="sample not available")
+
+    # No explicit media_type — let Starlette guess from the extension
+    # (sample is sample.jpg/png/webp).
+    return FileResponse(sample)
