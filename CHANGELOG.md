@@ -4,6 +4,7 @@
 
 - Auth hardening (INFO): JWT iss/aud claims + validation, registration password policy, per-user SSE stream cap, Langfuse content documentation.
 - SSE stream-slot leak fix (review HIGH): trainings/research stream setup failures (Redis, DB, cancellation) now release the reserved slot before re-raising, so acquire/release stays 1:1.
+- Follow-up: trainings stream setup releases the slot unconditionally even when pubsub unsubscribe/close itself raises — cleanup is best-effort (swallowed + logged) and can no longer mask the release.
 
 ## 2026-08-11 — Config/infra hardening (S-B)
 

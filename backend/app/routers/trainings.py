@@ -1,4 +1,5 @@
 import json
+import logging
 import shutil
 import uuid
 import zipfile
@@ -19,6 +20,8 @@ from app.db import get_db
 from app.models.trainings import TrainingJob
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 # Redis pub/sub + cancel flag channel names. The trainer worker (next batch)
 # will import these from its own module; they live here for now as the only
@@ -278,13 +281,18 @@ async def stream_training(
         await pubsub.subscribe(CHANNEL.format(job_id=job_id))
         job = await _get_owned_job(job_id, user_id, db)
     except BaseException:
-        # clean up whatever subscription exists (preserving the old partial
-        # cleanup), then put the slot back and let the original error propagate
+        # best-effort pubsub cleanup: unsubscribe/close failures are swallowed
+        # (they must not mask the original error), then the slot is released
+        # unconditionally before re-raising so a setup failure can't leak it
         if pubsub is not None:
             try:
                 await pubsub.unsubscribe(CHANNEL.format(job_id=job_id))
-            finally:
+            except BaseException:
+                logger.warning("pubsub unsubscribe failed in stream setup for %s", job_id, exc_info=True)
+            try:
                 await pubsub.aclose()
+            except BaseException:
+                logger.warning("pubsub aclose failed in stream setup for %s", job_id, exc_info=True)
         await release_stream_slot(user_id)
         raise
 
