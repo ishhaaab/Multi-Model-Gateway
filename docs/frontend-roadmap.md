@@ -201,6 +201,14 @@ Backend audit-INFO pass with two client-visible notes:
   (`progress`/`done`/`error`), and training streams are unchanged; the new per-user stream
   cap (429 "too many concurrent streams") only appears when one account holds
   `MAX_CONCURRENT_STREAMS` (default 4) streams at once.
+- **Login/refresh accept an optional `device_id`.** `POST /auth/login` and
+  `POST /auth/refresh` bodies may include `device_id` (string, max 128 chars) — the backend
+  binds refresh tokens to it for replay protection and 401s a bound token used from a
+  different/missing device id. **SPA status: DONE.** `frontend/src/lib/device-id.ts`
+  exports `getDeviceId()` (persistent per-browser id in its own `llm-gateway-device-id`
+  localStorage key, NOT the zustand store), and `api-endpoints.ts` `login()`/`refresh()`
+  plus the `api-client.ts` refresh-retry path send it. Legacy clients that omit the field
+  keep working (unbound tokens are accepted from any device). No other contract changes.
 
 ## Phases
 

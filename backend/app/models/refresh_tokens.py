@@ -13,3 +13,5 @@ class RefreshToken(Base):
     user_id= Column(UUID, ForeignKey("users.id", ondelete="CASCADE"))
     created_at= Column(DateTime, default= datetime.datetime.utcnow)
     expires_at= Column(DateTime)
+    # client-provided device binding for refresh replay protection
+    device_id= Column(String(128), nullable=True)

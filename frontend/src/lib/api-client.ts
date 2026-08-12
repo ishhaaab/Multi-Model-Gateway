@@ -1,5 +1,6 @@
 import type { ChatRequest } from "./types";
 import { useAuthStore } from "@/stores/auth-store";
+import { getDeviceId } from "@/lib/device-id";
 
 export class ApiError extends Error {
   statusCode: number;
@@ -209,7 +210,10 @@ class ApiClient {
         const response = await fetch(this.fullUrl("/auth/refresh"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: refreshToken }),
+          body: JSON.stringify({
+            refresh_token: refreshToken,
+            device_id: getDeviceId(),
+          }),
         });
         if (!response.ok) return false;
         const data = await response.json();

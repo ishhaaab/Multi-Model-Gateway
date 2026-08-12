@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { authApi } from "@/lib/api-endpoints";
+import { getDeviceId } from "@/lib/device-id";
 
 interface AuthState {
   isAuthenticated: boolean;
@@ -27,7 +28,7 @@ export const useAuthStore = create<AuthState>()(
       isInitializing: true,
 
       login: async (email, password) => {
-        const res = await authApi.login(email, password);
+        const res = await authApi.login(email, password, getDeviceId());
         set({
           isAuthenticated: true,
           accessToken: res.access_token,
@@ -76,7 +77,7 @@ export const useAuthStore = create<AuthState>()(
           return;
         }
         try {
-          const res = await authApi.refresh(refreshToken);
+          const res = await authApi.refresh(refreshToken, getDeviceId());
           set({
             isAuthenticated: true,
             accessToken: res.access_token,

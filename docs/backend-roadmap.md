@@ -683,3 +683,12 @@ Audit INFO items, landed together.
 - **Langfuse content documentation.** `README.md` notes that full chat content is sent to
   Langfuse unless a message is sent with `private: true` (metadata-only), and that
   deployments not using Langfuse should remove the `LANGFUSE_*` keys from `.env`.
+- **Refresh tokens bound to an optional client `device_id` (replay protection).**
+  `refresh_tokens.device_id` (`String(128)`, nullable — migration `b83db11a1dc0`) stores the
+  client-generated device id the token was minted for. `/auth/login` and `/auth/refresh`
+  accept an optional `device_id`; the rotated token carries the SAME binding as the row it
+  replaced. `/auth/refresh` rejects with 401 "invalid refresh token" when a bound row is
+  presented without an exact `device_id` match (missing or mismatched — both are 401).
+  Legacy rows with `device_id IS NULL` accept any caller, so pre-existing tokens keep
+  working. The `sub` cross-check, DB expiry check, JWT decode, and rotation behavior are
+  unchanged.

@@ -47,12 +47,17 @@ export const authApi = {
   register: (email: string, password: string) =>
     apiClient.request<{ message: string }>("POST", "/auth/register", { email, password }),
 
-  login: (email: string, password: string) =>
-    apiClient.request<LoginResponse>("POST", "/auth/login", { email, password }),
+  login: (email: string, password: string, deviceId?: string) =>
+    apiClient.request<LoginResponse>("POST", "/auth/login", {
+      email,
+      password,
+      ...(deviceId ? { device_id: deviceId } : {}),
+    }),
 
-  refresh: (refreshToken: string) =>
+  refresh: (refreshToken: string, deviceId?: string) =>
     apiClient.request<RefreshResponse>("POST", "/auth/refresh", {
       refresh_token: refreshToken,
+      ...(deviceId ? { device_id: deviceId } : {}),
     }),
 
   logout: (refreshToken: string) =>

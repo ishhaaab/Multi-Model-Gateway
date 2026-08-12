@@ -1,9 +1,10 @@
 import re
 import logging
+from typing import Optional
 
 from jose import jwt
 from datetime import datetime, timedelta
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -55,6 +56,7 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+    device_id: Optional[str] = Field(default=None, max_length=128)
 
 
 router = APIRouter()
@@ -130,7 +132,8 @@ async def login_user(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
         
         refresh_token= RefreshToken(token_hash= security.hash_token(token),
                                     user_id= user.id,
-                                    expires_at= expires_at
+                                    expires_at= expires_at,
+                                    device_id= user_data.device_id
         )
         db.add(refresh_token)
         await db.commit()
@@ -145,6 +148,7 @@ async def login_user(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+    device_id: Optional[str] = Field(default=None, max_length=128)
 
 
 @router.post("/refresh")
@@ -183,6 +187,12 @@ async def refresh_token(request: RefreshRequest, db: AsyncSession = Depends(get_
     if str(token_record.user_id) != str(payload.get("sub")):
         raise HTTPException(status_code=401, detail="invalid refresh token")
 
+    # device binding: a row minted for one device refuses rotation from any
+    # other. Legacy rows (device_id None) accept anything; rows with a binding
+    # require an exact match, so a missing device_id counts as a mismatch.
+    if token_record.device_id is not None and request.device_id != token_record.device_id:
+        raise HTTPException(status_code=401, detail="invalid refresh token")
+
     # rotate: invalidate the used refresh token and issue a fresh one
     await db.delete(token_record)
     new_expires_at = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRY_DAYS)
@@ -191,6 +201,7 @@ async def refresh_token(request: RefreshRequest, db: AsyncSession = Depends(get_
         token_hash=security.hash_token(new_refresh),
         user_id=user_id,
         expires_at=new_expires_at,
+        device_id=token_record.device_id,
     ))
     await db.commit()
 
