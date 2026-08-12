@@ -169,6 +169,17 @@ Chat and agent `messages` rows gain a nullable `token_provenance` field (`exact`
 additionally syncs exact counts off-path after the response. This is stored metadata —
 the `/v1/chat/completions` and `/v1/agent/chat` SSE wire formats are unchanged.
 
+### Agent tool: generate_image returns /v1/images/file URLs
+
+The agent now has a first-party **`generate_image`** tool (ComfyUI-backed). Its
+`tool_result` content is JSON `{"prompt_id", "images":[{filename, url}]}` where each
+`url` is a **same-origin relative path** (`/v1/images/file?...`, the authed gateway
+route — never a ComfyUI URL). The SPA agent-tool card renderer should detect this shape
+and render the images (e.g. `<img src={url}>` with the existing `apiClient` auth header
+handling); plain markdown rendering of the JSON is a degraded fallback. Frontend work is
+a follow-up batch — the backend change is additive and does not alter the agent SSE
+schema (`tool_result` events already carry arbitrary content strings).
+
 ### Auth hardening (S-A)
 
 Small backend auth-pass with two contract notes:

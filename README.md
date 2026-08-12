@@ -70,6 +70,7 @@ account, close the door: set `REGISTRATION_ENABLED=false` in `.env` and restart 
 - **JWT Authentication** — Access token (60 min) + refresh token (7 days, persisted) flow. Password hashing with bcrypt.
 - **Rate Limiting** — Sliding-window rate limit per user via Redis sorted sets (30 req/min default, configurable).
 - **Observability** — Prometheus metrics (request count, latency, tokens/sec by provider/model) + Langfuse Cloud LLM tracing.
+- **Agent Loop (tool calling)** — Agent mode (`/v1/agent/chat`) with first-party tools (`recall_recent_exchanges`, `web_search`, `fetch_page`, `current_datetime`, `search_conversations`, `generate_image`) plus MCP tools, gated by per-user permissions.
 
 ---
 

@@ -759,3 +759,53 @@ The Phase 4 maintainability items, landed together.
     `index=True` on the `user_id` ForeignKey column in BOTH models. No new migration
     was needed: the indexes already exist in the database from the original migrations,
     so the models now match the schema and `alembic check` sees no diff.
+
+## New agent tools (current_datetime, search_conversations, generate_image)
+
+Three first-party tools added to the agent toolchain, following the existing
+`recall.py` / `web_search.py` / `fetch_page.py` pattern: each module registers a
+`Tool` at import time (the `tools/__init__.py` import list), and handler failures
+return strings — never raise, so the agent run survives.
+
+- **`current_datetime`** (`services/tools/current_time.py` — module named so it doesn't
+  shadow stdlib `datetime`) — no args; returns a naive-UTC timestamp with the weekday,
+  e.g. `2026-08-11 06:15 UTC (Tuesday)`, plus a one-line note that the user's local time
+  may differ. Uses `datetime.utcnow` per the repo convention.
+- **`search_conversations`** (`services/tools/search_conversations.py`) — `query`
+  (required, capped at 200 chars) + optional `limit` (1–10, default 5). Searches THIS
+  user's conversations by title OR message content with case-insensitive `ILIKE`,
+  metacharacters (`%`, `_`, `\`) escaped via the module-level `_escape_like` helper,
+  `DISTINCT` on conversations, ordered by `created_at desc`. The `messages` join is a
+  LEFT OUTER JOIN with both predicates in the WHERE clause, so title-only conversations
+  (zero messages) also match when the title hits. Each result carries a snippet: the
+  most recent matching message truncated to ~200 chars, or `—` when only the title
+  matched. Returns a compact JSON array `[{id, title, snippet}]`, or
+  "No conversations matched." when nothing hits.
+- **`generate_image`** (`services/tools/generate_image.py`) — wraps
+  `services/comfy.generate_image` + `get_job_status` with `workflow_id=None` (base
+  workflow) and `batch_size=1`. Args: `prompt` (1–4000), `negative_prompt` (default
+  `"text, watermark, blurry, low quality"`), `steps` (1–50, default 10), `cfg` (0–20,
+  default 1.2), `aspect_ratio` (validated against `ASPECT_RATIOS`; a mismatch returns an
+  error listing the valid options), `seed` (optional), `training_id` (optional —
+  schema-only for now; LoRA resolution stays in the images router's
+  `_prepare_training_lora`).
+  - **Ownership registration:** after submission the handler sets
+    `imgjob:{prompt_id} → user_id` (TTL 1h) — the same key the images router uses — so
+    the user can poll `/v1/images/status/{prompt_id}` and fetch the result.
+  - **Polling:** one immediate `get_job_status`, then 4 × 5s `asyncio.sleep` checks
+    (~20s total, under `TOOL_TIMEOUT_SECONDS` = 30s). On `complete` each image's
+    `imgfile:{filename} → user_id` key is set (TTL `IMAGE_FILE_TTL_SECONDS`) and the
+    handler returns `{"prompt_id", "images"}` where `images` carry the relative
+    `/v1/images/file` URLs from `get_job_status`. On `failed` it returns the ComfyUI
+    error string.
+  - **Timeout:** still rendering after ~20s, it returns "Image generation started
+    (prompt_id …) and is still rendering; check the Images tab shortly." — the agent run
+    is not failed; the job stays visible via the Images tab.
+  - **Failures are strings:** any unexpected exception is caught and returned as
+    "Error: image generation failed: {e}".
+- **Tests:** `backend/tests/test_tools.py` (stdlib unittest, skip-import pattern like
+  `test_comfy.py`) — datetime format regex, `_escape_like` escaping (`%`/`_`/`\`),
+  compiled-SQL assertions that the search query uses a LEFT OUTER JOIN with both
+  predicates in the WHERE clause, a patched-redis `generate_image` error-path check,
+  and registry assertions that all three new names plus the pre-existing first-party
+  tools are registered. The full container suite now runs 99 tests (was 88).
