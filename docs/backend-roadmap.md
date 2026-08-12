@@ -760,9 +760,9 @@ The Phase 4 maintainability items, landed together.
     was needed: the indexes already exist in the database from the original migrations,
     so the models now match the schema and `alembic check` sees no diff.
 
-## New agent tools (current_datetime, search_conversations, generate_image)
+## New agent tools (current_datetime, search_conversations, generate_image, calculate)
 
-Three first-party tools added to the agent toolchain, following the existing
+Four first-party tools added to the agent toolchain, following the existing
 `recall.py` / `web_search.py` / `fetch_page.py` pattern: each module registers a
 `Tool` at import time (the `tools/__init__.py` import list), and handler failures
 return strings — never raise, so the agent run survives.
@@ -803,9 +803,26 @@ return strings — never raise, so the agent run survives.
     is not failed; the job stays visible via the Images tab.
   - **Failures are strings:** any unexpected exception is caught and returned as
     "Error: image generation failed: {e}".
+- **`calculate`** (`services/tools/calculate.py`) — safe arithmetic evaluator.
+  `expression` (required, capped at 500 chars). It is an **AST-whitelist
+  evaluator — never `eval`/`exec`**: the expression is parsed with
+  `ast.parse(expr, mode="eval")` and evaluated by a recursive walker that admits
+  only numeric literals, `+ - * / // % **`, unary `+`/`-`, parentheses, the
+  constants `pi`/`e`, and the functions `sqrt abs round min max pow exp log
+  log10 floor ceil sin cos tan` (implemented via `math`). Everything else —
+  attribute access, indexing, collections, comprehensions, strings, imports —
+  returns `Error: expression contains unsupported syntax`. Guard rails: AST depth
+  capped at 40 (tracked during the walk), arithmetic errors
+  (`ZeroDivisionError`/`OverflowError`/`ValueError`/`TypeError`) and non-finite
+  results return `Error: ...` strings. Results format integral values as ints and
+  floats to 10 significant digits.
 - **Tests:** `backend/tests/test_tools.py` (stdlib unittest, skip-import pattern like
   `test_comfy.py`) — datetime format regex, `_escape_like` escaping (`%`/`_`/`\`),
   compiled-SQL assertions that the search query uses a LEFT OUTER JOIN with both
   predicates in the WHERE clause, a patched-redis `generate_image` error-path check,
   and registry assertions that all three new names plus the pre-existing first-party
-  tools are registered. The full container suite now runs 99 tests (was 88).
+  tools are registered. The full container suite now runs 112 tests (was 99).
+- **Tests:** `backend/tests/test_calculate.py` (stdlib unittest, skip-import pattern like
+  `test_comfy.py`) — arithmetic/operator/function/constant happy paths plus
+  rejection cases (imports, attribute access, unknown names, division by zero,
+  math domain, over-length, over-deep AST) and a registry assertion.

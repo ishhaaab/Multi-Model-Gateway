@@ -3,6 +3,7 @@
 ## 2026-08-11 — New first-party agent tools
 
 - Agent tools: added current_datetime, search_conversations, and generate_image (ComfyUI-backed, ownership-aware).
+- Agent tool: safe calculate evaluator (AST whitelist — no eval/exec).
 
 ## 2026-08-11 — Maintainability (M1 + M4)
 
