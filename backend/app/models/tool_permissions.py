@@ -12,7 +12,7 @@ class ToolPermission(Base):
     """
     __tablename__ = "tool_permissions"
     id = Column(UUID, primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     tool_name = Column(String, nullable=False)
     allowed = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

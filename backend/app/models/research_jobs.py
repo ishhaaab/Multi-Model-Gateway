@@ -10,7 +10,7 @@ RESEARCH_STATUSES = {"queued", "running", "complete", "failed", "cancelled"}
 class ResearchJob(Base):
     __tablename__ = "research_jobs"
     id = Column(UUID, primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     query = Column(Text, nullable=False)
     provider = Column(String, nullable=True)   # auto local or openrouter"
     model = Column(String, nullable=True)

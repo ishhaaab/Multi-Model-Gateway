@@ -214,6 +214,11 @@ CR-17/18/19/20/21/22/23.
 ### Maintainability
 
 - **M1 — Dependencies unpinned (MED-7).** `pip-compile` and pin all versions.
+  - **Status: DONE** — `requirements.in` (editable source) → pip-compile → pinned
+    `requirements.txt` with the standard pip-compile header. The lock matches the running
+    container's installed versions exactly (0 version diffs across all 80 app
+    dependencies; verified via `pip freeze` comparison, `pip check`, the 88-test suite,
+    and `import app.main`). See "Maintainability fixes implemented (M1 + M4)" below.
 - **M2 — Stale Gemini references.** `.env.example` + README list `GEMINI_*` but no Gemini
   provider exists. Remove.
   - **Status: DONE** — `GEMINI_MODEL`/`GEMINI_API_KEY` removed from `.env.example`; a
@@ -226,6 +231,12 @@ CR-17/18/19/20/21/22/23.
     without overwriting existing values; README env-var table documents both.
 - **M4 — No CI schema-drift guard (CR-22).** CI: `alembic upgrade head` on scratch DB, boot app,
   assert empty autogenerate diff.
+  - **Status: DONE** — `backend/scripts/ci-schema-drift.sh` (migrate a scratch DB to head,
+    then `alembic check`, with an autogenerate-and-grep fallback for alembic < 1.9) +
+    `.github/workflows/schema-drift.yml` (push + PR: pgvector postgres service, install
+    pinned deps, run the guard, run the unit tests). Verified locally on a scratch DB —
+    the guard works and immediately uncovered a PRE-EXISTING drift, see the note in
+    "Maintainability fixes implemented (M1 + M4)" below.
 
 ### Latent / by-design (no action now)
 - **CR-17** orphaned conversation rows (hidden by `EXISTS` filter on `GET /v1/convo`).
@@ -689,6 +700,62 @@ Audit INFO items, landed together.
   accept an optional `device_id`; the rotated token carries the SAME binding as the row it
   replaced. `/auth/refresh` rejects with 401 "invalid refresh token" when a bound row is
   presented without an exact `device_id` match (missing or mismatched — both are 401).
-  Legacy rows with `device_id IS NULL` accept any caller, so pre-existing tokens keep
-  working. The `sub` cross-check, DB expiry check, JWT decode, and rotation behavior are
-  unchanged.
+   Legacy rows with `device_id IS NULL` accept any caller, so pre-existing tokens keep
+   working. The `sub` cross-check, DB expiry check, JWT decode, and rotation behavior are
+   unchanged.
+
+## Maintainability fixes implemented (M1 + M4)
+
+The Phase 4 maintainability items, landed together.
+
+- **M1 — dependencies pinned via pip-tools.**
+  - `backend/requirements.in` is the editable source of truth (the same direct deps the
+    unpinned `requirements.txt` listed, one per line, comments preserved where useful,
+    including the `bcrypt==4.0.1` pin). The header documents the workflow: edit
+    `requirements.in` → pip-compile → commit both files.
+  - `backend/requirements.txt` is now a generated lockfile (standard pip-compile header,
+    `# via` annotations, no hashes). Resolved inside the backend container. Because PyPI
+    had moved past the installed versions (openai 2.53.0 → 3.0.0, arq 0.25.0 → 0.28.0,
+    sqlalchemy 2.0.51 → 2.0.52, starlette 1.5.1 → 1.6.0, langfuse 4.14.3 → 4.14.4, plus a
+    redis 8.1.0 → 5.3.1 *downgrade* under the newer resolution graph), the lock was first
+    generated with the installed versions fed in as constraints, then re-run plain so the
+    committed header stays clean. Final pins match `pip freeze` of the running container
+    exactly — 0 version diffs across all 80 app dependencies — so the next build
+    reproduces the current environment (the running containers were NOT rebuilt; the next
+    trainer build picks up the pins via the shared base target while keeping its own
+    torch/ai-toolkit pins).
+  - Verified in the container: `pip check` clean, 88/88 unit tests pass, `import
+    app.main` boots.
+- **M4 — CI schema-drift guard.**
+  - `backend/scripts/ci-schema-drift.sh` (bash, `set -euo pipefail`, executable at commit
+    time via `git add --chmod=+x`): requires `DATABASE_URL` pointing at a scratch DB and
+    provides CI-safe dummies for the other pydantic-required settings
+    (REDIS_URL/SECRET_KEY/ALGORITHM/LM_URL/LM_DEFAULT_MODEL) that `alembic/env.py`'s
+    import of `app.core.config` demands. Runs `alembic upgrade head`, then `alembic
+    check` (alembic ≥ 1.9; installed is 1.19.1), with a fallback to `alembic revision
+    --autogenerate -m ci_check --rev-id=ci_check` + `grep -q "op\."` + file cleanup for
+    older alembics. Exits 1 with "schema drift detected: models and migrations disagree"
+    on any drift or failure.
+  - `.github/workflows/schema-drift.yml` — runs on push + pull_request: checkout →
+    setup-python 3.11 (pip cache keyed on the pinned lockfile) → `pip install -r
+    backend/requirements.txt` → the guard against a `pgvector/pgvector:pg16` service
+    (NOT stock `postgres:16` — the memories migration runs `CREATE EXTENSION vector`,
+    which the stock image doesn't ship) → `python -m unittest discover -s tests` in the
+    same job. YAML validated with PyYAML; the `on` key is quoted for strict YAML 1.1
+    parsers.
+  - **Local verification (scratch DB on the running postgres):** created
+    `llmgateway_ci`, ran the script inside the backend container with
+    `DATABASE_URL=postgresql://ishaab:ishaab27@postgres/llmgateway_ci`, then dropped the
+    DB (verified gone). The guard correctly failed (exit 1) against the pre-existing
+    drift described below, then passed clean (exit 0, "==> alembic check: no schema
+    drift") once the drift was reconciled.
+  - **Pre-existing drift uncovered and reconciled:** `alembic check` reported two
+    `remove_index` operations — `ix_research_jobs_user_id` and
+    `ix_tool_permissions_user_id`. Migrations `3fa8c20b911e` / `7d41aa30c5f2` created
+    those indexes explicitly, but the models (`models/research_jobs.py`,
+    `models/tool_permissions.py`) didn't declare `index=True` on `user_id`, so alembic
+    wanted to autogenerate drops for them — and no follow-up migration had ever
+    reconciled the mismatch. This drift predated M4. Reconciled by restoring
+    `index=True` on the `user_id` ForeignKey column in BOTH models. No new migration
+    was needed: the indexes already exist in the database from the original migrations,
+    so the models now match the schema and `alembic check` sees no diff.

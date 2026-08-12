@@ -246,6 +246,24 @@ llm-gateway/
 
 ---
 
+## Dependencies
+
+Backend dependencies are pinned with [pip-tools](https://github.com/jazzband/pip-tools):
+
+1. Edit `backend/requirements.in` — the editable source of truth (direct deps only, comments welcome).
+2. Regenerate the lockfile inside the backend container:
+   ```bash
+   docker compose exec -T backend pip-compile --output-file /app/requirements.txt /app/requirements.in
+   ```
+3. Commit **both** files. `backend/requirements.txt` is generated — never hand-edit it.
+
+CI (`.github/workflows/schema-drift.yml`) runs on every push and pull request: it installs
+the pinned dependencies, migrates a scratch PostgreSQL database to head and fails when the
+SQLAlchemy models and Alembic migrations disagree (schema-drift guard), then runs the
+backend unit tests.
+
+---
+
 ## Docker Services
 
 | Service | Image | Port | Purpose |

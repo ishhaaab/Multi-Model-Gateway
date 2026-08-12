@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-11 — Maintainability (M1 + M4)
+
+- Maintainability: pinned backend dependencies via pip-compile (requirements.in); added CI schema-drift guard + test workflow (M1, M4). The guard's first run uncovered pre-existing drift (ix_research_jobs_user_id / ix_tool_permissions_user_id) which was reconciled by restoring `index=True` on both `user_id` model columns — no new migration needed, the indexes already exist from the original migrations.
+
 ## 2026-08-11 — Auth hardening (INFO)
 
 - Auth hardening (INFO): JWT iss/aud claims + validation, registration password policy, per-user SSE stream cap, Langfuse content documentation.
