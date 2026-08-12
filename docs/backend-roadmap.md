@@ -620,3 +620,30 @@ A defensive pass over the auth/API surface, landed together.
   `error`) plus `params` is unchanged.
 - **JWTs carry `iat`.** Both `create_access_token` and `create_refresh_token` add
   `"iat": int(time.time())` to the payload.
+
+## Config / infra hardening (S-B)
+
+A configuration + infra hardening batch, landed together.
+
+- **Loopback monitoring ports.** `docker-compose.yml` binds Prometheus to
+  `127.0.0.1:9090:9090` and Grafana to `127.0.0.1:3000:3000` (previously `9090:9090` /
+  `3000:3000`). Dashboards remain reachable on the host for dev but are no longer exposed
+  to the tailnet — Caddy on `:80` is the only ingress (same policy as the backend port, S2).
+- **Caddy security headers.** The `:80` site block sets a site-level `header` directive
+  (applies to every handler): `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: no-referrer`, and a CSP (`default-src 'self'`, `img-src 'self' blob:
+  data:`, `style-src 'self' 'unsafe-inline'`, `connect-src 'self' http://localhost:2727
+  http://localhost:5173`, `script-src 'self'`). A comment documents the two CSP constraints:
+  `img-src` must include `blob:` (the SPA renders authed images as blob URLs via
+  AuthedImage) and `connect-src` must cover the API origins.
+- **DEBUG refused in production.** `core/config.py` raises `RuntimeError` at import when
+  `DEBUG=True` and `ENV=production` — the app fails boot on a bad config instead of echoing
+  SQL in prod.
+- **Provider `base_url` scheme validation + private-URL guard.** `routers/providers.py`
+  adds `_validate_provider_base_url`: `base_url` must be http(s) with a hostname, and — when
+  `ALLOW_PRIVATE_PROVIDER_URLS` is False — must resolve to a public (non-private/loopback/
+  link-local/reserved) address (mirrors `services/search.py::_assert_public_host`; resolution
+  failure skips the check). It runs on both create (ProviderCreate `model_validator`) and
+  update (the effective-state review-fix block), raising 422 on violation. The new
+  `ALLOW_PRIVATE_PROVIDER_URLS` flag defaults to `true` (local LM Studio-style providers keep
+  working); set `false` only on locked-down deployments.

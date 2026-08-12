@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-11 — Config/infra hardening (S-B)
+
+- Config/infra hardening: prometheus+grafana bound to loopback; Caddy security headers (CSP/X-Frame/etc.); DEBUG refused in production; provider base_url scheme validation + opt-in private-URL guard (S-B).
+
 ## 2026-08-11 — Backend auth hardening (S-A)
 
 - Backend — consistent 401s for missing/invalid credentials, refresh-token sub cross-check, authed aspect-ratios, generic provider-test errors, trainings detail path leak removed, JWT iat.

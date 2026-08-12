@@ -37,6 +37,20 @@ account, close the door: set `REGISTRATION_ENABLED=false` in `.env` and restart 
 (`docker compose up -d backend`). `POST /auth/register` then returns `403 {"detail":
 "registration disabled"}` for everyone — including attempts to re-register your own email.
 
+### Deployment hardening
+
+- **Use the prod Dockerfile target for anything beyond dev** — the compose `backend` service
+  builds `target: dev` by default (root user + `--reload`); the `prod` target runs as a
+  non-root user with no reload (`docker compose -f docker-compose.yml -f docker-compose.prod.yml up`
+  or a similar override).
+- **Set `REGISTRATION_ENABLED=false` for a personal deployment** once your account exists —
+  see [Locking down signups](#locking-down-signups).
+- **The operator OpenRouter key is shared into every account by design** — the "OpenRouter"
+  provider row is seeded per user from the same key, so only enable registration if you
+  intend a multi-user deployment where every account is trusted with that key.
+- **Monitoring is loopback-only** — Prometheus (`127.0.0.1:9090`) and Grafana
+  (`127.0.0.1:3000`) are bound to the host; Caddy on `:80` is the only tailnet ingress.
+
 ---
 
 ## Architecture
@@ -227,8 +241,8 @@ llm-gateway/
 4. Verify:
    - Health check: `http://localhost:2727/health`
    - API docs (Swagger UI): `http://localhost:2727/docs`
-   - Prometheus: `http://localhost:9090`
-   - Grafana: `http://localhost:3000` (admin user `admin`, password from `GRAFANA_ADMIN_PASSWORD` in your generated `.env` — the setup script generates one if you don't set it)
+   - Prometheus: `http://localhost:9090` (loopback-only — not reachable from the tailnet)
+   - Grafana: `http://localhost:3000` (loopback-only — not reachable from the tailnet; admin user `admin`, password from `GRAFANA_ADMIN_PASSWORD` in your generated `.env` — the setup script generates one if you don't set it)
 
 ---
 
@@ -241,8 +255,8 @@ llm-gateway/
 | `backend` | Build from `./backend/Dockerfile` | `127.0.0.1:2727:8000` (loopback-only) | FastAPI application |
 | `worker` | Build from `./backend/Dockerfile` | internal | arq deep-research job worker (same image as backend) |
 | `searxng` | `searxng/searxng` | internal | Optional self-hosted search for `web_search` + research (start with `--profile search`) |
-| `prometheus` | `prom/prometheus` | `9090:9090` | Metrics collection |
-| `grafana` | `grafana/grafana` | `3000:3000` | Dashboards (admin user `admin`; password = `GRAFANA_ADMIN_PASSWORD` in `.env`) |
+| `prometheus` | `prom/prometheus` | `127.0.0.1:9090:9090` (loopback-only) | Metrics collection |
+| `grafana` | `grafana/grafana` | `127.0.0.1:3000:3000` (loopback-only) | Dashboards (admin user `admin`; password = `GRAFANA_ADMIN_PASSWORD` in `.env`) |
 | `caddy` | `caddy:2` | `80:80` | Reverse proxy (strips `/api` prefix) |
 
 ---
@@ -280,6 +294,7 @@ Auto HTTPS is disabled. The frontend should call `/api/v1/*` and Caddy will forw
 | `METRICS_TOKEN` | No | Bearer token for `GET /metrics`; empty disables the endpoint (fail-closed). The setup scripts generate one and mirror it to `monitoring/metrics_token` for Prometheus |
 | `TRUSTED_PROXIES` | No | Comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` header the rate limiter trusts (default `172.16.0.0/12` — the Docker bridge Caddy sits on). Set to empty to ignore `X-Forwarded-For` entirely |
 | `REGISTRATION_ENABLED` | No | Set `false` to disable open signups — `POST /auth/register` returns 403 "registration disabled" (default `true`) |
+| `ALLOW_PRIVATE_PROVIDER_URLS` | No | Provider `base_url`s may point at private/loopback hosts (e.g. local LM Studio); set `false` to enforce public-only URLs — breaks local providers, use only on locked-down deployments (default `true`) |
 | `MCP_SERVERS` | No | JSON list of MCP servers (stdio/SSE) the agent can call. **Operator-configured only — it can spawn arbitrary commands; never let user input reach this setting** |
 | `LANGFUSE_PUBLIC_KEY` | No | Langfuse Cloud public key |
 | `LANGFUSE_SECRET_KEY` | No | Langfuse Cloud secret key |

@@ -104,7 +104,9 @@ services:
   prometheus:
     image: prom/prometheus
     ports:
-      - "9090:9090"
+      # loopback-only (S-B): the tailnet reaches Grafana/Prometheus through
+      # Caddy on :80 if ever needed; 9090 stays available on the host only.
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
       # bearer token for the gated /metrics endpoint (written by setup scripts)
@@ -113,7 +115,7 @@ services:
   grafana:
     image: grafana/grafana
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
     volumes:

@@ -4,9 +4,12 @@ Keys are encrypted at rest and never returned; ProviderOut exposes a masked
 suffix only. Ownership follows the codebase convention: 404 for "not found",
 403 for "someone else's".
 """
+import ipaddress
+import socket
 import uuid
 from datetime import datetime
 from typing import Literal, Optional
+from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +18,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import crypto
+from app.core.config import settings
 from app.core.security import get_current_user
 from app.db import get_db
 from app.models.providers import Provider
@@ -31,6 +35,44 @@ ProviderType = Literal["openai_compatible", "openai", "anthropic", "google", "op
 ProviderRole = Literal["local", "cloud"]
 
 
+def _validate_provider_base_url(base_url: str | None) -> None:
+    """Validate a provider base_url: must be http(s) with a hostname, and —
+    when ALLOW_PRIVATE_PROVIDER_URLS is False — must resolve to a public
+    (non-private/loopback/link-local/reserved) address. Returns early for
+    None/empty; raises ValueError with a reason on any violation."""
+    if not base_url:
+        return
+    parsed = urlparse(base_url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("base_url must be http(s)")
+    if not parsed.hostname:
+        raise ValueError("base_url must include a hostname")
+    if settings.ALLOW_PRIVATE_PROVIDER_URLS:
+        return
+    # Public-only mode: mirror services/search.py::_assert_public_host. A
+    # resolution failure is tolerated (the check is skipped) — a transient DNS
+    # miss shouldn't block saving a provider; the real connection will surface
+    # an unreachable host with a clear error.
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, None)
+    except socket.gaierror:
+        return
+    for info in infos:
+        addr = info[4][0]
+        ip = ipaddress.ip_address(addr)
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local      # covers 169.254.0.0/16 incl. cloud metadata
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise ValueError(
+                f"base_url must be a public URL, got non-public address {addr} (host '{parsed.hostname}')"
+            )
+
+
 class ProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     type: ProviderType
@@ -45,6 +87,7 @@ class ProviderCreate(BaseModel):
     def _require_base_url_for_compat(self):
         if self.type == "openai_compatible" and not self.base_url:
             raise ValueError("base_url is required for openai_compatible providers")
+        _validate_provider_base_url(self.base_url)
         return self
 
 
@@ -171,6 +214,10 @@ async def update_provider(
             status_code=422,
             detail="base_url is required for openai_compatible providers",
         )
+    try:
+        _validate_provider_base_url(eff_base_url)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     if "api_key" in data:
         data["api_key_encrypted"] = crypto.encrypt_secret(data.pop("api_key"))

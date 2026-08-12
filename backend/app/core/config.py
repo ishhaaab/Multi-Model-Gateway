@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     # set False to disable open registration (POST /auth/register -> 403)
     REGISTRATION_ENABLED: bool = True
 
+    # provider base_urls may point at private/loopback hosts (e.g. local LM
+    # Studio); set False to enforce public-only URLs — breaks local providers,
+    # use only on locked-down deployments
+    ALLOW_PRIVATE_PROVIDER_URLS: bool = True
+
     # max recent messages pulled into the prompt as direct context
     # (older turns remain reachable via semantic memory / RAG)
     MAX_HISTORY_MESSAGES: int = 30
@@ -151,6 +156,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Fail boot on a bad config instead of echoing SQL in prod: DEBUG dumps every
+# query and leaks data, so it must never combine with ENV=production.
+if settings.DEBUG and settings.ENV == "production":
+    raise RuntimeError("DEBUG=True is not allowed when ENV=production")
 
 
 import os
