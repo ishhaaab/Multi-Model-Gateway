@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-11 — Memory files (M1)
+
+- Memory files M1: per-user file store (`memory_files` table), 5 versioned memory tools (read/write/str_replace/append/delete), Tier-1 index + Tier-1.5 injection into chat/agent prompts.
+
 ## 2026-08-11 — New first-party agent tools
 
 - Agent tools: added current_datetime, search_conversations, and generate_image (ComfyUI-backed, ownership-aware).

@@ -20,7 +20,7 @@ from app.core.config import settings
 from app.models import (  # noqa: F401
     users, conversations, messages, refresh_tokens,
     presets, templates, memories, workflows, tool_permissions, research_jobs,
-    providers, trainings,
+    providers, trainings, memory_files,
 )
 from app.models.refresh_tokens import RefreshToken
 from app.db import AsyncSessionLocal

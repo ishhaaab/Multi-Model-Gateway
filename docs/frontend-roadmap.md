@@ -169,6 +169,23 @@ Chat and agent `messages` rows gain a nullable `token_provenance` field (`exact`
 additionally syncs exact counts off-path after the response. This is stored metadata —
 the `/v1/chat/completions` and `/v1/agent/chat` SSE wire formats are unchanged.
 
+### Agent memory files (M1)
+
+The backend gained a per-user, versioned **memory file store** (Claude-style)
+read/edited by five new first-party agent tools: `memory_read`,
+`memory_write`, `memory_str_replace`, `memory_append`, `memory_delete`. Two
+frontend notes:
+
+- **The agent tool list is dynamic** — no SPA change required. The agent
+  tool-permissions screen (and the backend `GET /v1/agent/tools` listing) picks
+  up the new tools automatically; they are first-party, so they are allowed by
+  default.
+- **Chat/agent prompts now include a memory index** — no SSE contract change.
+  `POST /v1/chat/completions` and `POST /v1/agent/chat` inject a leading
+  system message (or merge into the preset system prompt) with the user's
+  memory-file index and full Tier-1.5 files; the SSE wire formats are
+  unchanged, so existing clients stream them as ordinary system context.
+
 ### Agent tool: generate_image returns /v1/images/file URLs
 
 The agent now has a first-party **`generate_image`** tool (ComfyUI-backed). Its

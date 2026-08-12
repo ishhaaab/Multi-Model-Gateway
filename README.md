@@ -70,7 +70,8 @@ account, close the door: set `REGISTRATION_ENABLED=false` in `.env` and restart 
 - **JWT Authentication** — Access token (60 min) + refresh token (7 days, persisted) flow. Password hashing with bcrypt.
 - **Rate Limiting** — Sliding-window rate limit per user via Redis sorted sets (30 req/min default, configurable).
 - **Observability** — Prometheus metrics (request count, latency, tokens/sec by provider/model) + Langfuse Cloud LLM tracing.
-- **Agent Loop (tool calling)** — Agent mode (`/v1/agent/chat`) with first-party tools (`recall_recent_exchanges`, `web_search`, `fetch_page`, `current_datetime`, `search_conversations`, `generate_image`, `calculate`) plus MCP tools, gated by per-user permissions.
+- **Agent Loop (tool calling)** — Agent mode (`/v1/agent/chat`) with first-party tools (`recall_recent_exchanges`, `web_search`, `fetch_page`, `current_datetime`, `search_conversations`, `generate_image`, `calculate`, plus the `memory_read`/`memory_write`/`memory_str_replace`/`memory_append`/`memory_delete` memory tools) plus MCP tools, gated by per-user permissions.
+- **Memory Files (file store)** — Per-user, versioned memory files (a Claude-style file store, deliberately **not** embeddings/RAG) that the agent reads and edits through the `memory_*` tools — durable profile, preferences, and notes that persist across conversations. Every chat and agent prompt is prefixed with a Tier-1 index of the user's files (`- {path} — {description}`) plus full Tier-1.5 files (default `/profile.md`, `/preferences.md`) injected verbatim as system context, so the agent knows what it can read before it calls a tool.
 
 ---
 
@@ -315,6 +316,8 @@ Auto HTTPS is disabled. The frontend should call `/api/v1/*` and Caddy will forw
 | `REGISTRATION_ENABLED` | No | Set `false` to disable open signups — `POST /auth/register` returns 403 "registration disabled" (default `true`) |
 | `ALLOW_PRIVATE_PROVIDER_URLS` | No | Provider `base_url`s may point at private/loopback hosts (e.g. local LM Studio); set `false` to enforce public-only URLs — breaks local providers, use only on locked-down deployments (default `true`) |
 | `MCP_SERVERS` | No | JSON list of MCP servers (stdio/SSE) the agent can call. **Operator-configured only — it can spawn arbitrary commands; never let user input reach this setting** |
+| `MEMORY_FILE_CAP_BYTES` | No | Per-file cap for the user memory file store; writes at/over the cap are rejected, never truncated (default `32768`) |
+| `MEMORY_TIER1_5_PATHS` | No | Comma-separated memory file paths always injected in full into chat/agent context (default `/profile.md,/preferences.md`) |
 | `LANGFUSE_PUBLIC_KEY` | No | Langfuse Cloud public key |
 | `LANGFUSE_SECRET_KEY` | No | Langfuse Cloud secret key |
 | `LANGFUSE_BASE_URL` | No | Langfuse endpoint |

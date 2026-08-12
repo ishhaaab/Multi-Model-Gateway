@@ -42,6 +42,7 @@ from app.models.presets import (
 from app.models.tool_permissions import ToolPermission
 from app.services.convo import conversation, load_history, save_messages
 from app.services.memory import store_exchange_memories
+from app.services.memory_files import safe_build_memory_context
 from app.services.router import ChatRequest, get_provider
 from app.services.tools import registry
 
@@ -159,6 +160,16 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
         messages = history + [{"role": "user", "content": user_content}]
         if preset and preset.system_prompt:
             messages = [{"role": "system", "content": preset.system_prompt}] + messages
+
+        # Memory-file index injection (Tier 1 index + Tier 1.5 full files) —
+        # built BEFORE the connection is released below; best-effort, a memory
+        # failure must never fail the request.
+        memory_context = await safe_build_memory_context(db, user_id)
+        if memory_context:
+            if preset and preset.system_prompt:
+                messages[0]["content"] = preset.system_prompt + "\n\n" + memory_context
+            else:
+                messages = [{"role": "system", "content": memory_context}] + messages
 
         ctx = registry.ToolContext(user_id=user_id, conversation_id=conversation_id, db=db)
         allowed = await get_allowed_tools(user_id, db)

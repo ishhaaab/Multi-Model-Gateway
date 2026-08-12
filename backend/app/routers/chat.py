@@ -17,6 +17,7 @@ from app.core.exceptions import AppError
 
 from app.services.convo import conversation, load_history, save_messages, get_last_exchanges, detect_recall_request
 from app.services.memory import store_exchange_memories
+from app.services.memory_files import safe_build_memory_context
 from app.services.router import get_provider, ChatRequest
 from app.services.tokenize import sync_local_token_counts
 
@@ -88,6 +89,14 @@ async def _stream_tokens_inner(request: ChatRequest, user_id: str, db: AsyncSess
 
     if system_prefix:
         messages = system_prefix + messages
+
+    # Memory-file index injection (Tier 1 index + Tier 1.5 full files) — built
+    # BEFORE the connection is released below; best-effort, a memory failure
+    # must never fail the request. A separate leading system message preserves
+    # the preset prompt exactly as-is.
+    memory_context = await safe_build_memory_context(db, user_id)
+    if memory_context:
+        messages = [{"role": "system", "content": memory_context}] + messages
 
     try:
         provider, model, role = await get_provider(request, user_id, db)

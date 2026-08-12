@@ -826,3 +826,74 @@ return strings — never raise, so the agent run survives.
   `test_comfy.py`) — arithmetic/operator/function/constant happy paths plus
   rejection cases (imports, attribute access, unknown names, division by zero,
   math domain, over-length, over-deep AST) and a registry assertion.
+
+## Memory files (Claude-style)
+
+**Phase M1 — DONE** (storage layer, 5 tools, read-path injection).
+
+Per-user memory files, read and edited through agentic tool calls — a
+Claude-style file store. This is **explicitly NOT embeddings**: it is a plain
+versioned file store read via `memory_*` tools, entirely distinct from the
+pgvector RAG in `services/memory.py` (which remains untouched).
+
+- **`memory_files` table** (`models/memory_files.py`, migration
+  `a1b2c3d4e5f6`, down_revision `b83db11a1dc0` — NOT applied to the live DB,
+  code-review only; `create_table(..., if_not_exists=True)` so a later
+  `alembic upgrade head` is a no-op where the M1 tests pre-created the table
+  from the model): `user_id` FK (CASCADE), `path` (String 512),
+  `description` (String 512), `aliases` (String[]), `content` (Text),
+  `version` (Integer, default 1), `size_bytes`, `sources` (String 64),
+  `updated_at` (server `now()`), unique `(user_id, path)`. Versioned: every
+  mutating operation takes an `if_version` and a stale write is rejected with
+  the current content/version instead of silently clobbering.
+- **Storage layer** (`services/memory_files.py`, stdlib + SQLAlchemy only):
+  `_validate_path` (must start with `/`, ≤512 chars, no control chars, no
+  `..` segments), `memory_index` / `memory_read`, the single versioned-write
+  primitive `_apply_write` (cap enforcement via
+  `settings.MEMORY_FILE_CAP_BYTES` = 32768 — at/over the cap is rejected,
+  never truncated; `NEW_SENTINEL = "__new__"` creates; a versioned UPDATE
+  bumps `version + 1` only when the row still matches), and the derived ops
+  `memory_write`, `memory_append` (newline-separated), `memory_str_replace`
+  (refuses 0 or >1 matches), `memory_delete` (distinct not_found vs
+  conflict). `if_version` is coerced to int from the tools' string args.
+- **Five first-party tools** (`services/tools/memory_tools.py`, registered via
+  `tools/__init__.py`): `memory_read`, `memory_write`, `memory_str_replace`,
+  `memory_append`, `memory_delete`. All handlers return strings, never raise,
+  and scope by `ctx.user_id` (identity never comes from args). Descriptions
+  make the versioning contract explicit (read before write; `if_version` from
+  a prior read; `__new__` to create; str_replace needs exactly one
+  occurrence). All five are first-party (allowed by default); they are listed
+  in the dynamic agent tool list like every other tool.
+- **Read-path injection** — `routers/chat.py` and `services/agent.py` build
+  the memory context BEFORE their `db.close()` and prepend/merge it into the
+  system prompt: chat appends a leading system message (preset prompt stays
+  untouched), agent merges after the preset `system_prompt` with `"\n\n"` (or
+  adds a leading system message when there is no preset prompt). The context
+  is the Tier-1 index (one line per file, path-ordered:
+  `- {path} — {description}` + aliases) plus Tier-1.5 full-file blocks for
+  `MEMORY_TIER1_5_PATHS` (`/profile.md,/preferences.md`), prefixed
+  "User memory files:". Injection is best-effort:
+  `safe_build_memory_context` catches/logs and returns `""` so a memory
+  failure never fails a chat/agent request. The SSE wire formats are
+  unchanged.
+- **Tests** — `backend/tests/test_memory_files.py` (stdlib unittest, runs in
+  the container against the real DB with a throwaway user row per test):
+  versioned create/update, stale-version conflict with current
+  content/version, create-when-exists conflict, read miss, str_replace
+  0/2/1-match outcomes, append + version advance, delete + read-None, size
+  cap rejection (settings patched low), `build_memory_context` empty/index/
+  tier-1.5, path validation, and registry presence of all five tools. The
+  test ensures the `memory_files` table exists (creates it from the model
+  when the migration hasn't been applied).
+
+**Phase M2 — background curation is NEXT:** an agent loop that observes
+conversations and proactively writes/updates memory files (e.g. extracting
+durable facts into `/profile.md`, summarizing preferences) rather than only
+serving files the agent explicitly edits. Not started.
+
+## Verification (memory files M1)
+
+- `docker compose exec -T backend python -m unittest discover -s /app/tests -v` — full suite passes (112 existing + new memory-file tests).
+- `python -m py_compile` on all new/changed files.
+- `docker compose exec -T backend python -c "from app.services.tools import registry; print(sorted(t.name for t in registry.all_tools()))"` — includes the 5 `memory_*` tools.
+- `docker compose exec -T backend python -c "import app.main"` — boots.

@@ -95,6 +95,13 @@ class Settings(BaseSettings):
     #  {"name":"remote","transport":"sse","url":"http://mcp-host:8080/sse"}]
     MCP_SERVERS: str = ""
 
+    # Per-user memory files (Claude-style file store, read via agentic tools —
+    # NOT the pgvector RAG in services/memory.py). Files are versioned; every
+    # mutating memory_* tool takes an if_version and gets a conflict back when
+    # the file moved underneath it.
+    MEMORY_FILE_CAP_BYTES: int = 32768   # per-file cap; writes at/over cap are rejected, never truncated
+    MEMORY_TIER1_5_PATHS: str = "/profile.md,/preferences.md"   # always-injected full files (comma-separated)
+
     # Deep research 
     RESEARCH_MAX_QUERIES: int = 4          # search queries the planner may issue
     RESEARCH_RESULTS_PER_QUERY: int = 4    # results kept per search
