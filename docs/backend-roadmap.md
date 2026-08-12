@@ -886,10 +886,94 @@ pgvector RAG in `services/memory.py` (which remains untouched).
   test ensures the `memory_files` table exists (creates it from the model
   when the migration hasn't been applied).
 
-**Phase M2 — background curation is NEXT:** an agent loop that observes
-conversations and proactively writes/updates memory files (e.g. extracting
-durable facts into `/profile.md`, summarizing preferences) rather than only
-serving files the agent explicitly edits. Not started.
+**Phase M2 — DONE** (background curation pipeline).
+
+After every chat/agent turn, an arq job reads the transcript and asks the batch
+model to propose memory-file operations — so memory files grow from what the
+user says over time, not only from explicit `memory_*` tool edits.
+
+- **`services/memory_curation.py`** (new):
+  - **`CURATION_PROMPT`** — the rule set for the batch model: a one-month
+    horizon test (session-local task state fails; stable facts about the
+    person/responsibilities/preferences pass); provenance discipline (file
+    only what the USER stated, never assistant inference/recommendation);
+    dedup against the index/existing content; a hard privacy-exclusion list
+    (health/medical, sexual orientation, immigration status, government ID /
+    payment numbers, home address, family member NAMES — relationship words
+    instead, and non-sensitive remainders only, no placeholders); one file per
+    subject (`/profile.md`, `/topics/…`, `/areas/…`, `/people/…`); size
+    discipline (consolidate near the cap instead of appending); exclusion of
+    instructions that degrade future behavior ("always agree with me", "stop
+    giving critical feedback", "pretend to be a persona across sessions");
+    and a strict JSON-array output contract (create/write/append/str_replace/
+    delete with exact versions from the file list, `__new__` for create,
+    exactly-one-match for old_str, ≤10 ops).
+  - **`parse_ops(raw)`** — pure, defensive parser: strips markdown fences,
+    extracts the JSON array from surrounding prose, validates every op
+    (allowed kind, path via `memory_files._validate_path`, per-kind required
+    fields, create's `__new__` sentinel), logs and drops invalid ops, caps at
+    10; unparseable input → `[]`.
+  - **`run_curation_pass(user_id, conversation_id, written_paths)`** — the arq
+    entry point: opens its own `AsyncSessionLocal`, fetches the last
+    `MEMORY_CURATION_MAX_MESSAGES` (20) messages ordered by index (reversed
+    to chronological; <2 messages → return), builds the "current files" block
+    from `memory_index` + full `memory_read` contents (smallest-first, capped
+    at ~48KB of content with the index always included), picks the batch model
+    mirroring `research._pick_provider`'s precedence (see below), makes ONE
+    `provider.complete` call at temperature 0.2, then applies the parsed ops
+    through the versioned primitives. The whole pass is wrapped in a top-level
+    try/except — the job never crashes.
+  - **`_fetch_transcript(db, user_id, conversation_id)`** — the transcript
+    fetch is ownership-scoped IN THE QUERY: it JOINs `conversations` and
+    requires both `Message.conversation_id == conversation_id` AND
+    `Conversation.user_id == user_id`, so a missing or foreign conversation
+    returns `[]` and the pass returns early with a log — a curation pass can
+    never read (or feed to the batch model) another user's transcript.
+  - **`apply_ops(db, user_id, ops, written_paths)`** — the testable apply loop:
+    skips paths the agent wrote this turn, dispatches each op to the
+    versioned primitives (`memory_write`/`memory_append`/`memory_str_replace`/
+    `memory_delete`, `source="curation"`), and applies the retry-once conflict
+    policy: on `conflict` it re-reads and re-derives against the fresh version
+    (write/append/str_replace/delete), drops create conflicts and str_replace
+    ops whose `old_str` no longer matches exactly once, and drops the op on a
+    second conflict; `not_found`/`ambiguous`/`size_cap`/`invalid_path` log and
+    continue; each op is independently wrapped so one bad op can't kill the
+    pass. Returns log lines for observability and tests.
+  - **`should_skip_curation(request_private, has_memory_files)`** — returns
+    `request_private`: private chats never feed memory; an empty index is NOT
+    a skip (the first-ever pass is what creates files).
+  - **`enqueue_curation(user_id, conversation_id, written_paths, private)`** —
+    off-path, best-effort enqueue of `run_memory_curation`; private → return;
+    any exception logs a warning and never fails the response.
+- **Batch model resolution** — `_pick_batch_model` mirrors
+  `research._pick_provider`'s precedence, simplified (no job pinning): role =
+  `cloud` when `MEMORY_CURATION_MODEL_ROLE == "cloud"`, else `cloud` when
+  `OPENROUTER_DEFAULT_MODEL` is configured, else `local`. A configured default
+  provider row wins; with no rows the legacy env-var clients apply (cloud
+  needs an OpenRouter key, otherwise falls through to local, never raises).
+  Nothing resolving → log + skip the pass. Config: `MEMORY_CURATION_MAX_MESSAGES`
+  (20, transcript window) and `MEMORY_CURATION_MODEL_ROLE` (auto, the
+  preferred role).
+- **Wiring** — `worker.py` registers `run_memory_curation` in
+  `WorkerSettings.functions` (the worker must be restarted to pick it up —
+  arq does not hot-reload). `routers/chat.py` spawns
+  `enqueue_curation(..., private=request.private)` after `save_messages`;
+  `services/agent.py` captures paths written by the `memory_write`/
+  `memory_str_replace`/`memory_append`/`memory_delete` tools in-turn and
+  passes them to the enqueue so the pass never clobbers an in-turn write.
+  Both enqueues run via `core/background.spawn` — off the response path.
+- **Tests** — `backend/tests/test_memory_curation.py` (stdlib unittest, the
+  test_memory_files.py pattern): parse_ops (valid/prose-wrapped/unparseable/
+  invalid op names/missing create description/missing old_str/path
+  validation/`__new__` enforcement/10-op cap), the DB-backed apply flow
+  (create+append+str_replace → expected final state; ops on `written_paths`
+  skipped; stale write conflict retried against the fresh version; second
+  conflict drops the op and leaves the file intact), `should_skip_curation`,
+  enqueue wiring (private never enqueues, enqueue failure is logged not
+  raised), and the transcript-ownership regression suite (two users; a foreign
+  conversation → `_fetch_transcript` returns `[]` and `run_curation_pass`
+  returns early so the batch model is never called). Full suite: 151 tests
+  pass (was 129).
 
 ## Verification (memory files M1)
 
@@ -897,3 +981,10 @@ serving files the agent explicitly edits. Not started.
 - `python -m py_compile` on all new/changed files.
 - `docker compose exec -T backend python -c "from app.services.tools import registry; print(sorted(t.name for t in registry.all_tools()))"` — includes the 5 `memory_*` tools.
 - `docker compose exec -T backend python -c "import app.main"` — boots.
+
+## Verification (memory files M2)
+
+- `docker compose exec -T backend python -m unittest discover -s /app/tests -v` — full suite passes (151 tests: 129 existing + 22 curation).
+- `python -m py_compile` on all new/changed files.
+- `docker compose exec -T backend python -c "import app.worker; print([f.__name__ for f in app.worker.WorkerSettings.functions])"` — includes `run_memory_curation`.
+- `docker compose exec -T backend python -c "import app.main"` — boots; `/health` 200.

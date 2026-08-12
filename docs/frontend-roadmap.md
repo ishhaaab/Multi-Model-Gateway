@@ -186,6 +186,15 @@ frontend notes:
   memory-file index and full Tier-1.5 files; the SSE wire formats are
   unchanged, so existing clients stream them as ordinary system context.
 
+### Agent memory files (M2) — backend-only, no contract change
+
+The backend gained a **background curation pipeline** (M2): after each
+chat/agent turn an arq job (`run_memory_curation`) reads the transcript,
+asks the batch model for memory-file operations, and applies them through the
+same versioned `memory_*` primitives. This is entirely server-side — no new
+endpoints, no SSE schema changes, and the SPA/mobile clients see memory files
+grow over time without any code change.
+
 ### Agent tool: generate_image returns /v1/images/file URLs
 
 The agent now has a first-party **`generate_image`** tool (ComfyUI-backed). Its

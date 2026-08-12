@@ -42,11 +42,16 @@ from app.models.presets import (
 from app.models.tool_permissions import ToolPermission
 from app.services.convo import conversation, load_history, save_messages
 from app.services.memory import store_exchange_memories
+from app.services.memory_curation import enqueue_curation
 from app.services.memory_files import safe_build_memory_context
 from app.services.router import ChatRequest, get_provider
 from app.services.tools import registry
 
 logger = logging.getLogger(__name__)
+
+# M2: memory tools that mutate the file store — their paths are captured so the
+# background curation pass skips them (it must never clobber an in-turn write).
+_MEMORY_WRITE_TOOLS = ("memory_write", "memory_str_replace", "memory_append", "memory_delete")
 
 
 def _sse(event: dict) -> str:
@@ -198,6 +203,9 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
         completion_tok = 0
         final_answer = ""
         truncated = False
+        # memory-file paths the agent wrote this turn (M2) — the curation pass
+        # skips them so it can't clobber an in-turn memory write
+        written_paths: list[str] = []
 
         # +1 lap: the last one always runs tool less so a final answer is produced
         for iteration in range(settings.AGENT_MAX_ITERATIONS + 1):
@@ -274,6 +282,16 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
                 yield _sse({"type": "tool_call", "id": tc.id, "name": name,
                             "arguments": tc.arguments})
 
+                if name in _MEMORY_WRITE_TOOLS:
+                    # best-effort: parse the args for the path the agent is
+                    # writing; a malformed payload just means no capture
+                    try:
+                        targs = json.loads(tc.arguments or "{}")
+                    except ValueError:
+                        targs = {}
+                    if isinstance(targs, dict) and targs.get("path"):
+                        written_paths.append(str(targs["path"]))
+
                 tool = tools_by_name.get(name)
                 if tool is None:
                     # not registered, or registered but not permitted for this user
@@ -304,6 +322,11 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
             record_metrics, resolved_provider, model, elapsed, prompt_tok, completion_tok,
             messages, final_answer, conversation_id, not request.private,
         ))
+        # M2: background memory curation — off-path, best-effort; private chats
+        # are excluded inside enqueue_curation; paths the agent wrote this turn
+        # are passed along so the pass skips them.
+        spawn(enqueue_curation(str(user_id), str(conversation_id), written_paths,
+                               private=request.private))
 
         yield _sse({"type": "done", "conversation_id": conversation_id, "truncated": truncated})
 

@@ -17,6 +17,7 @@ from app.core.exceptions import AppError
 
 from app.services.convo import conversation, load_history, save_messages, get_last_exchanges, detect_recall_request
 from app.services.memory import store_exchange_memories
+from app.services.memory_curation import enqueue_curation
 from app.services.memory_files import safe_build_memory_context
 from app.services.router import get_provider, ChatRequest
 from app.services.tokenize import sync_local_token_counts
@@ -204,6 +205,10 @@ async def _stream_tokens_inner(request: ChatRequest, user_id: str, db: AsyncSess
             record_metrics, resolved_provider, model, elapsed, prompt_tok, completion_tok,
             messages, full_response, conversation_id, not request.private,
         ))
+        # M2: background memory curation — off-path, best-effort; private chats
+        # are excluded inside enqueue_curation so they never feed memory.
+        spawn(enqueue_curation(str(user_id), str(conversation_id), [],
+                               private=request.private))
 
     if stream_error:
         yield "data: [ERROR] stream interrupted\n\n"

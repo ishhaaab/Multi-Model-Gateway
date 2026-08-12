@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     # the file moved underneath it.
     MEMORY_FILE_CAP_BYTES: int = 32768   # per-file cap; writes at/over cap are rejected, never truncated
     MEMORY_TIER1_5_PATHS: str = "/profile.md,/preferences.md"   # always-injected full files (comma-separated)
+    # Background curation (M2): the arq job reads the last N transcript messages
+    # and proposes memory-file ops; the batch model prefers this provider role.
+    MEMORY_CURATION_MAX_MESSAGES: int = 20   # transcript window fed to the curator
+    MEMORY_CURATION_MODEL_ROLE: str = "auto" # auto/local/cloud — which role the batch model prefers
 
     # Deep research 
     RESEARCH_MAX_QUERIES: int = 4          # search queries the planner may issue

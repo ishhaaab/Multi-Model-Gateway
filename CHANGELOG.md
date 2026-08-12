@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-11 — Memory files (M2)
+
+- Memory files M2: background curation pipeline (arq job, rule-based curation prompt, strict op parsing, versioned apply with retry-once, private chats excluded).
+
 ## 2026-08-11 — Memory files (M1)
 
 - Memory files M1: per-user file store (`memory_files` table), 5 versioned memory tools (read/write/str_replace/append/delete), Tier-1 index + Tier-1.5 injection into chat/agent prompts.
