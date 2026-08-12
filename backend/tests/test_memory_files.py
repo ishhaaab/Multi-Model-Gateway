@@ -411,20 +411,44 @@ class MemoryToolsRegistryTests(unittest.TestCase):
     def test_handlers_never_raise_on_db_error(self):
         async def scenario():
             ctx = self._ctx()
-            # memory_read: the service call itself blows up -> error string
-            handler = self.registry.get_tool("memory_read").handler
-            with patch.object(memory_files, "memory_read",
-                              new=AsyncMock(side_effect=RuntimeError("db down"))):
-                result = await handler({"path": "/notes.md"}, ctx)
-            self.assertTrue(result.startswith("Error: memory operation failed:"), result)
-
-            # memory_write: same contract via the _safe wrapper
-            handler = self.registry.get_tool("memory_write").handler
-            with patch.object(memory_files, "memory_write",
-                              new=AsyncMock(side_effect=RuntimeError("db down"))):
-                result = await handler(
-                    {"path": "/notes.md", "content": "x", "if_version": "__new__"}, ctx)
-            self.assertTrue(result.startswith("Error: memory operation failed:"), result)
+            # Every memory tool handler must turn a broken service call into an
+            # "Error: ..." string, never raise — the never-raise contract that
+            # keeps the agent run alive. Each handler's DIRECT service call is
+            # patched to raise RuntimeError; the _safe wrapper is the backstop
+            # that converts it. (Patching the direct call means the failure
+            # path is reached before the service can do its own memory_read.)
+            cases = {
+                "memory_read": (
+                    "memory_read",
+                    {"path": "/notes.md"},
+                ),
+                "memory_write": (
+                    "memory_write",
+                    {"path": "/notes.md", "content": "x", "if_version": "__new__"},
+                ),
+                "memory_str_replace": (
+                    "memory_str_replace",
+                    {"path": "/notes.md", "old_str": "a", "new_str": "b",
+                     "if_version": "1"},
+                ),
+                "memory_append": (
+                    "memory_append",
+                    {"path": "/notes.md", "content": "x", "if_version": "1"},
+                ),
+                "memory_delete": (
+                    "memory_delete",
+                    {"path": "/notes.md", "if_version": "1"},
+                ),
+            }
+            for name, (service_name, args) in cases.items():
+                handler = self.registry.get_tool(name).handler
+                with patch.object(memory_files, service_name,
+                                  new=AsyncMock(side_effect=RuntimeError("db down"))):
+                    result = await handler(args, ctx)
+                self.assertTrue(
+                    result.startswith("Error: memory operation failed:"),
+                    f"{name} leaked: {result!r}",
+                )
         self._run(scenario())
 
 
