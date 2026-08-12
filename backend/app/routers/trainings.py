@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.queue import get_queue
 from app.core.redis import get_redis
 from app.core.security import get_current_user
+from app.core.stream_guard import acquire_stream_slot, release_stream_slot
 from app.db import get_db
 from app.models.trainings import TrainingJob
 
@@ -259,21 +260,44 @@ async def stream_training(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
+    # reserve the stream slot BEFORE touching pubsub so a 429 can't leak the
+    # subscription (the handler must answer before StreamingResponse exists)
+    await acquire_stream_slot(user_id)
+
     # Subscribe to the channel BEFORE reading the job row: a terminal event
     # published between the snapshot read and the subscribe would otherwise be
-    # missed, leaving the stream hanging on a finished job. (research.py has the
-    # same pattern — out of scope here.)
-    redis = await get_redis()
-    pubsub = redis.pubsub()
-    await pubsub.subscribe(CHANNEL.format(job_id=job_id))
+    # missed, leaving the stream hanging on a finished job.
+    # Any failure between the acquire above and the StreamingResponse below
+    # must release the slot: the relay generator's finally only runs once the
+    # stream actually starts iterating, so setup errors (Redis down, DB error,
+    # task cancellation) would otherwise leak the reservation permanently.
+    pubsub = None
     try:
+        redis = await get_redis()
+        pubsub = redis.pubsub()
+        await pubsub.subscribe(CHANNEL.format(job_id=job_id))
         job = await _get_owned_job(job_id, user_id, db)
-    except Exception:
-        await pubsub.unsubscribe(CHANNEL.format(job_id=job_id))
-        await pubsub.aclose()
+    except BaseException:
+        # clean up whatever subscription exists (preserving the old partial
+        # cleanup), then put the slot back and let the original error propagate
+        if pubsub is not None:
+            try:
+                await pubsub.unsubscribe(CHANNEL.format(job_id=job_id))
+            finally:
+                await pubsub.aclose()
+        await release_stream_slot(user_id)
         raise
 
     async def relay():
+        try:
+            async for event in _relay_inner():
+                yield event
+        finally:
+            # release the stream slot on every exit path — normal completion,
+            # terminal-job shortcut, error, and client disconnect
+            await release_stream_slot(user_id)
+
+    async def _relay_inner():
         # snapshot first, so late subscribers see the current state immediately
         yield f"data: {json.dumps({'type': 'progress', 'stage': job.stage, 'progress': job.progress, 'message': job.status})}\n\n"
         if job.status in ("complete", "failed", "cancelled"):

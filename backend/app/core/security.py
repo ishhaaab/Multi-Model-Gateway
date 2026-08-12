@@ -49,6 +49,8 @@ def create_refresh_token(user_id: str, expires_at) -> str:
         "sub": user_id,
         "exp": expires_at,
         "iat": int(time.time()),
+        "iss": settings.JWT_ISSUER,
+        "aud": settings.JWT_AUDIENCE,
         "type": "refresh",
         "jti": uuid.uuid4().hex,   # nonce so every refresh token and its hash is unique
     }
@@ -58,12 +60,15 @@ def create_access_token(user_id: str) -> str:
     payload = {"sub": user_id,
                "exp" : datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRY_MINUTES),
                "iat": int(time.time()),
+               "iss": settings.JWT_ISSUER,
+               "aud": settings.JWT_AUDIENCE,
                "type": "access"}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(_AuthBearer())):
     try:
-        decoded = jwt.decode(credentials.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        decoded = jwt.decode(credentials.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM],
+                             issuer=settings.JWT_ISSUER, audience=settings.JWT_AUDIENCE)
         user_id= decoded.get("sub")
         if decoded.get("type") != "access":
             raise HTTPException(status_code=401, detail="invalid token type")

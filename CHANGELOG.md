@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-11 — Auth hardening (INFO)
+
+- Auth hardening (INFO): JWT iss/aud claims + validation, registration password policy, per-user SSE stream cap, Langfuse content documentation.
+- SSE stream-slot leak fix (review HIGH): trainings/research stream setup failures (Redis, DB, cancellation) now release the reserved slot before re-raising, so acquire/release stays 1:1.
+
 ## 2026-08-11 — Config/infra hardening (S-B)
 
 - Config/infra hardening: prometheus+grafana bound to loopback; Caddy security headers (CSP/X-Frame/etc.); DEBUG refused in production; provider base_url scheme validation + opt-in private-URL guard (S-B).

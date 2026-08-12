@@ -31,6 +31,7 @@ from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.metrics import record_metrics
 from app.core.background import spawn
+from app.core.stream_guard import release_stream_slot
 from app.db import AsyncSessionLocal
 from app.models.presets import (
     DEFAULT_TEMPERATURE,
@@ -314,3 +315,7 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
         logger.error("Unexpected error in agent run: %s", repr(e))
         yield _sse({"type": "error", "message": "internal server error"})
         yield _sse({"type": "done", "conversation_id": conversation_id})
+    finally:
+        # release the stream slot on every exit path — normal completion,
+        # handled errors, unhandled errors, and client disconnect
+        await release_stream_slot(user_id)

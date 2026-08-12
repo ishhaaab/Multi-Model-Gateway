@@ -183,6 +183,25 @@ Small backend auth-pass with two contract notes:
   (the absolute server path was leaking). **SPA type updated:** `dataset_dir` was removed
   from `TrainingJobDetail` in `frontend/src/lib/types.ts`; no SPA code read the field.
 
+### Auth hardening — claims + policy (audit INFO)
+
+Backend audit-INFO pass with two client-visible notes:
+
+- **Registration password policy changed.** `POST /auth/register` now rejects passwords
+  shorter than 8 characters or lacking a letter **or** a digit — 422
+  `"password must be at least 8 characters with at least one letter and one number"`.
+  The web SPA mirrors the rule in `frontend/src/pages/register.tsx` `validate()` (and the
+  PasswordInput hint now reads "At least 8 characters with a letter and a number").
+- **Existing sessions are invalidated once.** New JWTs carry `iss`/`aud` claims and every
+  decode validates them, so tokens issued before the change are rejected — every client
+  re-logs in a single time after the backend deploys (the 401-refresh-retry path in
+  `api-client.ts` already handles this: the refresh fails → the user is sent to login).
+- **No other SPA contract changes.** The SSE event schemas for chat (`[token]` / `[DONE]` /
+  `[ERROR]`), agent (`tool_call`/`tool_result`/`token`/`error`/`done`), research
+  (`progress`/`done`/`error`), and training streams are unchanged; the new per-user stream
+  cap (429 "too many concurrent streams") only appears when one account holds
+  `MAX_CONCURRENT_STREAMS` (default 4) streams at once.
+
 ## Phases
 
 ### Phase 1 — Scaffold + contract layer + auth

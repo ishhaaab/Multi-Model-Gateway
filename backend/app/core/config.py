@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     RATE_LIMIT_WINDOW_SECONDS: int = 60
     AUTH_RATE_LIMIT_PER_MINUTE: int = 10
 
+    MAX_CONCURRENT_STREAMS: int = 4   # per-user cap on open SSE streams
+
     METRICS_TOKEN: str = ""   # bearer token for GET /metrics; empty disables the endpoint (fail-closed)
 
     # comma-separated CIDRs of trusted reverse proxies (e.g. Caddy) whose
@@ -116,6 +118,12 @@ class Settings(BaseSettings):
     
     SECRET_KEY: str
     ALGORITHM: str
+
+    # JWT issuer/audience claims, validated on every decode. Tokens minted
+    # before these existed lack the claims and are rejected once — users
+    # simply re-login (documented in backend-roadmap.md).
+    JWT_ISSUER: str = "llm-gateway"
+    JWT_AUDIENCE: str = "llm-gateway-api"
 
     # Optional explicit Fernet key (32 urlsafe base64 bytes) for encrypting
     # user-provided provider API keys at rest. Empty => derived from SECRET_KEY

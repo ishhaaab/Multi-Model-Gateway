@@ -47,8 +47,8 @@ class UserCreate(BaseModel):
     @field_validator("password")
     @classmethod
     def _password_length(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("password must be at least 8 characters")
+        if len(v) < 8 or not any(c.isalpha() for c in v) or not any(c.isdigit() for c in v):
+            raise ValueError("password must be at least 8 characters with at least one letter and one number")
         return v
 
 
@@ -165,7 +165,8 @@ async def refresh_token(request: RefreshRequest, db: AsyncSession = Depends(get_
 
     # verify JWT signature/exp and type
     try:
-        payload = jwt.decode(request.refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(request.refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM],
+                             issuer=settings.JWT_ISSUER, audience=settings.JWT_AUDIENCE)
         user_id = payload.get("sub")
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=401, detail="invalid token type")

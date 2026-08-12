@@ -647,3 +647,39 @@ A configuration + infra hardening batch, landed together.
   update (the effective-state review-fix block), raising 422 on violation. The new
   `ALLOW_PRIVATE_PROVIDER_URLS` flag defaults to `true` (local LM Studio-style providers keep
   working); set `false` only on locked-down deployments.
+
+## Auth hardening — claims + policy (audit INFO)
+
+Audit INFO items, landed together.
+
+- **JWT `iss`/`aud` claims + validation.** Both `create_access_token` and
+  `create_refresh_token` now stamp `"iss": settings.JWT_ISSUER` (`"llm-gateway"`) and
+  `"aud": settings.JWT_AUDIENCE` (`"llm-gateway-api"`) onto the payload (next to the
+  existing `iat`). `get_current_user` and `/auth/refresh` decode with
+  `issuer=settings.JWT_ISSUER, audience=settings.JWT_AUDIENCE`, so tokens from another
+  issuer (or for another audience) are rejected with the standard 401s — same try/except
+  behavior, no new error paths. **Existing sessions are invalidated once:** previously-issued
+  tokens lack the claims, so every client re-logs in a single time after deploy; nothing
+  else changes (tokens refresh normally afterwards).
+- **Registration password policy.** `routers/auth.py` `UserCreate._password_length` now
+  requires `len >= 8` **and** at least one letter **and** at least one digit; violation
+  returns 422 `"password must be at least 8 characters with at least one letter and one
+  number"`. Login is untouched — it still accepts whatever credentials existing accounts
+  were created with (only `UserCreate` validates).
+- **Per-user SSE concurrency cap.** New `core/stream_guard.py`: an in-memory per-user
+  counter guarded by an `asyncio.Lock`, capped at `settings.MAX_CONCURRENT_STREAMS` (default
+  4). `acquire_stream_slot(user_id)` runs in each router handler **before** the
+  `StreamingResponse` is created (a 429 "too many concurrent streams" is a real HTTP
+  response, not an in-stream SSE error); `release_stream_slot(user_id)` runs in each
+  generator's `finally` (fires on normal completion, error, and client disconnect). Wired
+  into `/v1/chat/completions`, `/v1/agent/chat`, `/v1/research/{id}/stream`, and
+  `/v1/trainings/{id}/stream`. In-memory is correct because the backend is a single
+  container; a horizontally-scaled deployment would need a shared counter. Acquire/release
+  stays 1:1 even when the stream never starts: `stream_training` wraps every step between
+  the acquire and the `StreamingResponse` (Redis pubsub setup + ownership check) in
+  `try/except BaseException` that closes any created pubsub and releases the slot before
+  re-raising; `stream_research` wraps its ownership check the same way (its pubsub setup
+  lives inside the generator, already covered by the relay `finally`).
+- **Langfuse content documentation.** `README.md` notes that full chat content is sent to
+  Langfuse unless a message is sent with `private: true` (metadata-only), and that
+  deployments not using Langfuse should remove the `LANGFUSE_*` keys from `.env`.

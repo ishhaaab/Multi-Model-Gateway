@@ -10,6 +10,7 @@ import logging
 from app.db import get_db, AsyncSessionLocal
 
 from app.core.security import get_current_user
+from app.core.stream_guard import acquire_stream_slot, release_stream_slot
 from app.core.metrics import record_metrics
 from app.core.background import spawn
 from app.core.exceptions import AppError
@@ -52,6 +53,16 @@ async def load_preset(preset_id, user_id, db: AsyncSession):
 
 
 async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
+    """Outer generator: guarantees the per-user stream slot acquired in the
+    handler is released on normal completion, error, or client disconnect."""
+    try:
+        async for event in _stream_tokens_inner(request, user_id, db):
+            yield event
+    finally:
+        await release_stream_slot(user_id)
+
+
+async def _stream_tokens_inner(request: ChatRequest, user_id: str, db: AsyncSession):
     conversation_id = await conversation(request, user_id, db)
     history = await load_history(conversation_id, request.messages[-1].content, db)
     current = {"role": "user", "content": request.messages[-1].content}
@@ -192,6 +203,7 @@ async def stream_tokens(request: ChatRequest, user_id: str, db: AsyncSession):
 
 @router.post("/chat/completions")
 async def chat_completions(request: ChatRequest, db: AsyncSession = Depends(get_db), user_id=Depends(get_current_user)):
+    await acquire_stream_slot(user_id)
     return StreamingResponse(
         stream_tokens(request, user_id, db),
         media_type="text/event-stream",

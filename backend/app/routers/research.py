@@ -11,6 +11,7 @@ from app.db import get_db
 from app.core.queue import get_queue
 from app.core.redis import get_redis
 from app.core.security import get_current_user
+from app.core.stream_guard import acquire_stream_slot, release_stream_slot
 from app.models.research_jobs import ResearchJob
 from app.services.research import CANCEL_KEY, CHANNEL, resolve_research_model
 from app.services.router import Provider
@@ -142,9 +143,29 @@ async def stream_research(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
-    job = await _get_owned_job(job_id, user_id, db)
+    await acquire_stream_slot(user_id)
+    # Defensive symmetry with trainings.py: the only setup between the slot
+    # acquire and the StreamingResponse is this ownership check (an await that
+    # can raise on DB errors or task cancellation). The redis/pubsub wiring
+    # lives inside the relay generator, whose finally already releases the slot
+    # — but a failure here happens before the stream exists, so release it on
+    # the spot to keep acquire/release 1:1.
+    try:
+        job = await _get_owned_job(job_id, user_id, db)
+    except BaseException:
+        await release_stream_slot(user_id)
+        raise
 
     async def relay():
+        try:
+            async for event in _relay_inner():
+                yield event
+        finally:
+            # release the stream slot on every exit path — normal completion,
+            # terminal-job shortcut, error, and client disconnect
+            await release_stream_slot(user_id)
+
+    async def _relay_inner():
         # snapshot first, so late subscribers see the current state immediately
         yield f"data: {json.dumps({'type': 'progress', 'stage': job.stage, 'progress': job.progress, 'message': job.status})}\n\n"
         if job.status in ("complete", "failed", "cancelled"):

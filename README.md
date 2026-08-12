@@ -475,7 +475,7 @@ Local provider parameters (`top_k`, `min_p`, `repeat_penalty`) are sent via `ext
 - **Prometheus** scrapes `backend:8000/metrics` every 15s.
 - Custom metrics: `chat_requests_total`, `chat_latency_seconds`, `tokens_per_second`, `prompt_tokens_total`, `active_conversations_total`.
 - **Grafana** runs on port 3000.
-- **Langfuse** traces every chat generation with input, output, model, provider, latency, and token metadata.
+- **Langfuse** traces every chat generation with input, output, model, provider, latency, and token metadata. Full chat content is sent to Langfuse unless the message is sent with `private: true` (those chats record metadata only). If you don't use Langfuse, remove the `LANGFUSE_*` keys from `.env`.
 
 ---
 

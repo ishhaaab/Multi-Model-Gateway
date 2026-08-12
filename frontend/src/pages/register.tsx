@@ -21,7 +21,8 @@ export default function RegisterPage() {
 
   const validate = (): string | null => {
     if (!email.includes("@")) return "Please enter a valid email address.";
-    if (password.length < 8) return "Password must be at least 8 characters.";
+    if (password.length < 8 || !/[a-zA-Z]/.test(password) || !/\d/.test(password))
+      return "Password must be at least 8 characters with a letter and a number.";
     if (password !== confirm) return "Passwords don't match.";
     return null;
   };
@@ -86,7 +87,7 @@ export default function RegisterPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="••••••••"
-          hint="At least 8 characters"
+          hint="At least 8 characters with a letter and a number"
           leftIcon={<Lock size={16} />}
           disabled={loading}
         />

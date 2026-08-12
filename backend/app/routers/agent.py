@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.core.security import get_current_user
+from app.core.stream_guard import acquire_stream_slot
 from app.models.tool_permissions import ToolPermission
 from app.routers.chat import load_preset
 from app.services.agent import run_agent
@@ -28,6 +29,7 @@ async def agent_chat(
     user_id: str = Depends(get_current_user),
 ):
     preset = await load_preset(request.preset_id, user_id, db)
+    await acquire_stream_slot(user_id)
     return StreamingResponse(
         run_agent(request, user_id, preset, db),
         media_type="text/event-stream",
