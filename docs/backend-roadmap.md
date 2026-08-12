@@ -591,3 +591,32 @@ The Phase 3 data-integrity leftovers (D4 + R7), landed together.
 - **Tests:** `backend/tests/test_worker.py` asserts `WorkerSettings.cron_jobs` is non-empty,
   `WorkerSettings.functions` still includes `run_research`, and `sweep_expired_tokens` is
   callable (offline; the sweep itself is never invoked).
+
+## Auth hardening (S-A)
+
+A defensive pass over the auth/API surface, landed together.
+
+- **Consistent 401s for missing credentials.** `core/security.py` introduces `_AuthBearer`
+  (an `HTTPBearer` subclass with `auto_error=False`): the parent returns `None` instead of
+  raising when the `Authorization` header is absent (or isn't a Bearer scheme), and the
+  subclass raises `401 {"detail":"not authenticated"}` in that case. `get_current_user` now
+  depends on `Depends(_AuthBearer())`, so every authed route answers **401** for a missing
+  header instead of FastAPI's stock 403 — invalid/expired tokens keep their existing 401s.
+- **Refresh-token `sub` cross-check.** `routers/auth.py` `/auth/refresh` now verifies
+  `str(token_record.user_id) == str(payload.get("sub"))` after the DB expiry check and JWT
+  decode, before minting the rotated token — a mismatched row/claim pair can't be rotated.
+- **`GET /v1/images/aspect-ratios` now authed.** The static config endpoint takes
+  `user_id: str = Depends(get_current_user)` like every other `/v1` route; response shape
+  unchanged. The SPA already sends the bearer token on every request, so no client change
+  was needed beyond the roadmap note.
+- **Provider test errors genericized.** `services/provider_registry.py::test_provider` logs
+  the real exception server-side (`logger.warning`) and returns
+  `{"ok": false, "error": "provider test failed"}` instead of leaking the raw exception
+  string (URLs, key fragments, SDK tracebacks) to the client. The `{ok, model}` success
+  path and the `"no default model set"` result are unchanged.
+- **Trainings detail no longer leaks `dataset_dir`.** `GET /v1/trainings/{id}` drops the
+  absolute server path from the response; the summary shape (`id`, `name`, `base_model`,
+  `status`, `stage`, `progress`, `created_at`, `artifact_filename`, `sample_image`,
+  `error`) plus `params` is unchanged.
+- **JWTs carry `iat`.** Both `create_access_token` and `create_refresh_token` add
+  `"iat": int(time.time())` to the payload.

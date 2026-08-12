@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-11 — Backend auth hardening (S-A)
+
+- Backend — consistent 401s for missing/invalid credentials, refresh-token sub cross-check, authed aspect-ratios, generic provider-test errors, trainings detail path leak removed, JWT iat.
+
 ## 2026-08-11 — Data integrity fixes (D4 + R7)
 
 - Backend — optional limit/offset pagination on convo/presets/templates (D4); hourly expired refresh-token sweep via arq cron (R7).

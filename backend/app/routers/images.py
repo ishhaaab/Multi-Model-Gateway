@@ -172,7 +172,7 @@ async def image_file(
 
 
 @router.get("/images/aspect-ratios")
-async def list_aspect_ratios():
+async def list_aspect_ratios(user_id: str = Depends(get_current_user)):
     # Static config & the single source of truth for the
     # ResolutionSelector node, shared by every workflow that uses it.
     return {"aspect_ratios": ASPECT_RATIOS, "default": DEFAULT_ASPECT_RATIO}

@@ -176,6 +176,12 @@ async def refresh_token(request: RefreshRequest, db: AsyncSession = Depends(get_
     except Exception:
         raise HTTPException(status_code=401, detail="refresh token expired or invalid")
 
+    # defensive cross-check: the DB row and the JWT claim must name the same
+    # user, or the rotated token (minted from the JWT claim below) would
+    # inherit a tampered/mismatched sub.
+    if str(token_record.user_id) != str(payload.get("sub")):
+        raise HTTPException(status_code=401, detail="invalid refresh token")
+
     # rotate: invalidate the used refresh token and issue a fresh one
     await db.delete(token_record)
     new_expires_at = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRY_DAYS)

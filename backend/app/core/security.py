@@ -1,8 +1,9 @@
 import hashlib
+import time
 import uuid
 
 from jose import jwt
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
@@ -26,10 +27,28 @@ def hash_token(token: str) -> str:
     """SHA-256 of a refresh token for at-rest storage as tokens are high-entropy"""
     return hashlib.sha256(token.encode()).hexdigest()
 
+class _AuthBearer(HTTPBearer):
+    """HTTPBearer that answers 401 for a MISSING Authorization header too.
+
+    FastAPI's stock bearer with auto_error=True returns 403 when the header is
+    absent but 401 when it's invalid — inconsistent. With auto_error=False the
+    parent returns None instead of raising, so a missing header (or a
+    non-Bearer scheme) falls through to a uniform 401 here.
+    """
+    def __init__(self) -> None:
+        super().__init__(auto_error=False)
+
+    async def __call__(self, request: Request):
+        creds = await super().__call__(request)
+        if creds is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="not authenticated")
+        return creds
+
 def create_refresh_token(user_id: str, expires_at) -> str:
     payload = {
         "sub": user_id,
         "exp": expires_at,
+        "iat": int(time.time()),
         "type": "refresh",
         "jti": uuid.uuid4().hex,   # nonce so every refresh token and its hash is unique
     }
@@ -38,10 +57,11 @@ def create_refresh_token(user_id: str, expires_at) -> str:
 def create_access_token(user_id: str) -> str:
     payload = {"sub": user_id,
                "exp" : datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRY_MINUTES),
+               "iat": int(time.time()),
                "type": "access"}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(_AuthBearer())):
     try:
         decoded = jwt.decode(credentials.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id= decoded.get("sub")

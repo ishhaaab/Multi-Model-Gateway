@@ -225,7 +225,6 @@ async def get_training(
     job = await _get_owned_job(job_id, user_id, db)
     return {
         **_job_summary(job),
-        "dataset_dir": job.dataset_dir,
         "params": job.params,
         "sample_image": job.sample_image,
     }

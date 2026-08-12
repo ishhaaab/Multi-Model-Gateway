@@ -139,8 +139,11 @@ async def test_provider(row) -> dict:
             temperature=0.1,
             max_tokens=1,
         )
-    except Exception as exc:  # noqa: BLE001 — the whole point is to surface any failure
-        return {"ok": False, "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 — any failure must surface as a generic test result
+        # the real exception stays server-side; the client gets a generic message
+        # so provider internals (urls, key fragments, sdk tracebacks) never leak.
+        logger.warning("provider test failed (%s): %s", getattr(row, "name", "?"), exc)
+        return {"ok": False, "error": "provider test failed"}
     return {"ok": True, "model": row.default_model}
 
 

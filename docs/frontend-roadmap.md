@@ -119,9 +119,11 @@ image generation. New endpoints:
 - `GET /v1/trainings/{id}/sample` — authed sample-image preview (404 unless the job is
   complete and a sample exists; media type guessed from the extension).
 
-**`TrainingJob` summary shape** (list items; detail adds `dataset_dir`, `params`,
-`sample_image`): `id`, `name`, `base_model`, `status` (`queued|running|complete|failed|cancelled`),
-`stage`, `progress`, `created_at`, `artifact_filename`, `sample_image`, `error`.
+**`TrainingJob` summary shape** (list items; detail adds `params`, `sample_image`): `id`,
+`name`, `base_model`, `status` (`queued|running|complete|failed|cancelled`), `stage`,
+`progress`, `created_at`, `artifact_filename`, `sample_image`, `error`. The detail response
+**no longer includes `dataset_dir`** (the absolute server path was removed — the SPA never
+used it; the `TrainingJobDetail` type was updated to match).
 
 **`ImageRequest`** now accepts `training_id` — uses a trained LoRA from a completed job
 (the backend injects a ComfyUI `LoraLoader` node). Requires `COMFY_LORA_DIR` (host folder)
@@ -166,6 +168,20 @@ Chat and agent `messages` rows gain a nullable `token_provenance` field (`exact`
 `chunk_count` | null) describing how `tokens_used` was derived; the local chat path
 additionally syncs exact counts off-path after the response. This is stored metadata —
 the `/v1/chat/completions` and `/v1/agent/chat` SSE wire formats are unchanged.
+
+### Auth hardening (S-A)
+
+Small backend auth-pass with two contract notes:
+
+- **`GET /v1/images/aspect-ratios` now requires auth** (a valid access token, like every
+  other `/v1` route). Response shape unchanged. **SPA impact: none** — the web client's
+  `apiClient.request()` attaches the `Authorization: Bearer` header automatically, and the
+  aspect-ratio grid already goes through `imageApi.aspectRatios()`, so no code change was
+  needed. The mobile port must keep sending the token on this call (it already does via the
+  ported `api-endpoints.ts`).
+- **`GET /v1/trainings/{id}` no longer includes `dataset_dir`** in the detail response
+  (the absolute server path was leaking). **SPA type updated:** `dataset_dir` was removed
+  from `TrainingJobDetail` in `frontend/src/lib/types.ts`; no SPA code read the field.
 
 ## Phases
 

@@ -345,9 +345,9 @@ export interface TrainingJob {
   error?: string | null;
 }
 
-// Full job (GET /v1/trainings/{id})
+// Full job (GET /v1/trainings/{id}) — dataset_dir was removed from the detail
+// response (server path leak; the SPA never used it).
 export interface TrainingJobDetail extends TrainingJob {
-  dataset_dir: string;
   params: { steps: number; learning_rate: number; resolution: number };
 }
 
