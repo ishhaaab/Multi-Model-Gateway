@@ -161,6 +161,7 @@ account, close the door: set `REGISTRATION_ENABLED=false` in `.env` and restart 
 | GET | `/v1/hardware` | GPU/VRAM probe (pynvml or nvidia-smi) | Yes |
 | GET | `/v1/cookbook` | Fit-score the local LM Studio catalog against your hardware | Yes |
 | GET | `/v1/hf/models` | Search Hugging Face models (`search`, `limit` 1–50) fit-scored against your hardware | Yes |
+| GET | `/v1/hf/models/{repo_id}` | HF model detail + per-quant GGUF-accurate fit (`context_tokens` 512–262144) | Yes |
 
 ### Health
 

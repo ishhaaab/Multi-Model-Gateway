@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-13 — HF model browser + GGUF-accurate fit (F1)
+
+- Backend: new `GET /v1/hf/models/{repo_id}` (auth) — HF repo stats (downloads/likes/params/description), capability + format pills, and per-quant VRAM fits computed from each GGUF's own header (real n_layer/n_embd/n_head[_kv], exact KV formula, 10% safety margin; verdicts fits_fully / fits_cpu_offload / likely_too_large / cpu_only / unknown). Header reads are 4MB Range requests cached in-process (600s), capped at 12 quants.
+- Backend: `gguf` dependency added (header parser; manual KV walker because GGUFReader needs a real path and reads all tensor data); `HF_TOKEN` / `KV_CACHE_BYTES_PER_ELEMENT` / `FIT_SAFETY_MARGIN` settings.
+- Tests: `backend/tests/test_hf_detail.py` (18 cases: quant grouping/regex, fit arithmetic, header walker, mocked end-to-end detail). Full suite 176 tests (was 158).
+
 ## 2026-08-13 — Unified model-fit cookbook (Hugging Face tab)
 
 - Backend: new `GET /v1/hf/models` (auth) — searches the Hugging Face Hub API (downloads-sorted, in-process 10-min TTL cache) and fit-scores the results with the same `estimate_fit`/verdict ranking as the local cookbook (`build_hf_cookbook` shares `_VERDICT_RANK`).

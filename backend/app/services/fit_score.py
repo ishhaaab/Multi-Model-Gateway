@@ -11,14 +11,24 @@ a promise:
 
 Verdicts: fits_fully (need ≤ free VRAM), partial_offload (≥40% of the
 weights fit), wont_fit, cpu_only (no GPU detected).
+
+The HF model browser (F1) is exact where it can be: for GGUF repos it reads
+the quant file's own header (llama.block_count / embedding_length /
+head_count[_kv]) and sizes the KV cache from the real architecture instead of
+the ballpark above — see estimate_gguf_fit / read_gguf_metadata. Verdicts:
+fits_fully (with FIT_SAFETY_MARGIN headroom), fits_cpu_offload, likely_too_large,
+cpu_only, unknown.
 """
 import logging
 import re
+import struct
 import time
 
+import gguf
 import httpx
 
 from app.core.config import settings
+from app.services.hardware import probe_hardware
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +62,61 @@ def _cache_get(search: str, limit: int) -> list[dict] | None:
 
 def _cache_set(search: str, limit: int, models: list[dict]) -> None:
     _hf_cache[(search, limit)] = (time.monotonic(), models)
+
+
+# ---- GGUF quant files (HF model browser, F1) ----
+
+# header read is a Range request: 4 MB covers the magic/version/counts, the
+# whole KV metadata section, and the tensor-info table for large models
+_GGUF_RANGE_BYTES = 4_000_000
+
+_GGUF_FILE_RE = re.compile(r"\.gguf$", re.IGNORECASE)
+# quant token from a filename ("Q4_K_M", "Q8_0", "Q1_0"…); the label is the
+# matched token uppercased
+_QUANT_RE = re.compile(r"Q(\d[0-9]?)_?([A-Za-z0-9_]*)?", re.IGNORECASE)
+# shard suffix: "-00001-of-00003.gguf"
+_SHARD_RE = re.compile(r"-(\d{5})-of-(\d{5})\.gguf$")
+
+# GGUF v2/v3 are the versions gguf's own reader supports; anything else is
+# either byte-order-swapped or not a GGUF file
+_GGUF_SUPPORTED_VERSIONS = (2, 3)
+
+# in-process TTL cache for GGUF header reads (keyed by resolve URL)
+_GGUF_META_CACHE_TTL = 600  # seconds
+_gguf_meta_cache: dict[str, tuple[float, dict | None]] = {}
+
+# scalar value sizes for the GGUF header walker (GGUF is little-endian)
+_GGUF_VALUE_FMT = {
+    gguf.GGUFValueType.UINT8: ("<B", 1),
+    gguf.GGUFValueType.INT8: ("<b", 1),
+    gguf.GGUFValueType.UINT16: ("<H", 2),
+    gguf.GGUFValueType.INT16: ("<h", 2),
+    gguf.GGUFValueType.UINT32: ("<I", 4),
+    gguf.GGUFValueType.INT32: ("<i", 4),
+    gguf.GGUFValueType.FLOAT32: ("<f", 4),
+    gguf.GGUFValueType.BOOL: ("<?", 1),
+    gguf.GGUFValueType.UINT64: ("<Q", 8),
+    gguf.GGUFValueType.INT64: ("<q", 8),
+    gguf.GGUFValueType.FLOAT64: ("<d", 8),
+}
+
+# known architecture substrings used to infer `arch` when the model has no
+# safetensors block to name it
+_KNOWN_ARCHS = (
+    "llama", "mistral", "mixtral", "qwen", "gemma", "phi", "falcon",
+    "deepseek", "gpt", "mpt", "yi", "baichuan", "olmo", "stablelm",
+    "internlm", "starcoder", "codestral", "granite", "nemotron", "solar",
+    "exaone", "smollm", "glm", "minicpm", "t5", "bert", "roberta",
+)
+
+# tag scrape for the browser's capability pills (best-effort; often empty)
+_VISION_TAGS = {"image-text-to-text", "visual-question-answering", "image-to-text",
+                "any-to-text", "multimodal", "vision"}
+_TOOL_TAGS = {"function-calling", "tool-calling", "tools"}
+
+# shared sort order for the browser quant list: smallest first so cheap quants
+# are scored first and the header-read cap hits the big ones last
+_QUANT_READ_CAP = 12
 
 
 def _parse_params_b(text: str) -> float | None:
@@ -243,4 +308,402 @@ async def build_hf_cookbook(hardware: dict, context_tokens: int, search: str = "
         "search": search,
         "models": entries,
         "count": len(entries),
+    }
+
+
+# ---- GGUF quant grouping (HF model browser) ----
+
+
+def _extract_quant(filename: str) -> str | None:
+    """Pull the quant token from a GGUF filename.
+
+    The shard suffix and the extension are stripped first so the LAST quant
+    match wins ("qwen2.5-7b-instruct-Q4_K_M.gguf" → "Q4_K_M", never a stray
+    "Q2" from the model id). Returns None when the name has no Q-token
+    (f16/bf16/f32 checkpoints).
+    """
+    stem = _SHARD_RE.sub("", filename)
+    stem = _GGUF_FILE_RE.sub("", stem)
+    matches = list(_QUANT_RE.finditer(stem))
+    if not matches:
+        return None
+    return matches[-1].group(0).upper()
+
+
+def group_gguf_quants(files: list[dict]) -> list[dict]:
+    """Collapse a repo's file list into one entry per logical quant option.
+
+    Sharded checkpoints ("-00001-of-00003.gguf") group under their shared
+    quant token with the parts' sizes summed; every non-sharded .gguf file is
+    its own entry. Non-GGUF files are ignored. Entries are sorted by size
+    ascending so the cheapest quant is scored first. Returns [] for a repo
+    with no GGUF files.
+    """
+    options: dict[str, dict] = {}
+
+    def _add(filename: str, size: int | None, is_shard: bool) -> None:
+        quant = _extract_quant(filename) or filename
+        entry = options.setdefault(
+            quant,
+            {"quant": quant, "filenames": [], "size_bytes": 0, "is_sharded": False},
+        )
+        entry["filenames"].append(filename)
+        entry["size_bytes"] += size or 0
+        entry["is_sharded"] = entry["is_sharded"] or is_shard
+
+    for f in files:
+        filename = f.get("filename") or ""
+        if not _GGUF_FILE_RE.search(filename):
+            continue
+        _add(filename, f.get("size"), is_shard=bool(_SHARD_RE.search(filename)))
+
+    return sorted(options.values(), key=lambda o: o["size_bytes"])
+
+
+# ---- GGUF header reading (HF model browser) ----
+
+
+def _read_gguf_string(data: bytes, off: int) -> tuple[str | None, int]:
+    """GGUF strings are u64 length + bytes; returns (string, next_offset)."""
+    if off + 8 > len(data):
+        return None, off
+    n = struct.unpack_from("<Q", data, off)[0]
+    off += 8
+    end = off + n
+    if end > len(data):
+        return None, off
+    return data[off:end].decode("utf-8", errors="replace"), end
+
+
+def _read_gguf_value(data: bytes, off: int, vtype: gguf.GGUFValueType) -> tuple[object | None, int]:
+    """One GGUF KV value starting at `off`; returns (value, next_offset)."""
+    if vtype == gguf.GGUFValueType.STRING:
+        return _read_gguf_string(data, off)
+    if vtype == gguf.GGUFValueType.ARRAY:
+        # GGUF array layout (matching gguf's own reader): u32 element type,
+        # then u64 count, then the elements
+        if off + 12 > len(data):
+            return None, off
+        elem_type = gguf.GGUFValueType(struct.unpack_from("<I", data, off)[0])
+        count = struct.unpack_from("<Q", data, off + 4)[0]
+        off += 12
+        items = []
+        for _ in range(min(count, 4096)):
+            item, off = _read_gguf_value(data, off, elem_type)
+            if item is None:
+                return None, off
+            items.append(item)
+        return items, off
+    fmt = _GGUF_VALUE_FMT.get(vtype)
+    if fmt is None or off + fmt[1] > len(data):
+        return None, off
+    return struct.unpack_from(fmt[0], data, off)[0], off + fmt[1]
+
+
+def _parse_gguf_header(data: bytes) -> dict | None:
+    """Walk the GGUF header and pull the fields the fit formula needs.
+
+    This is a manual walker over the spec layout (magic, version, tensor/kv
+    counts, then the KV section) instead of gguf.GGUFReader, because the
+    reader requires a real file path AND eagerly memmaps every tensor's data —
+    on a partial 4 MB body it raises in _build_tensors before the caller can
+    touch `fields` (verified against gguf 0.19.0). The KV section we care
+    about lives entirely in the first few KB, well inside the range read.
+    """
+    try:
+        if len(data) < 24:
+            return None
+        if struct.unpack_from("<I", data, 0)[0] != gguf.GGUF_MAGIC:
+            return None
+        version = struct.unpack_from("<I", data, 4)[0]
+        if version not in _GGUF_SUPPORTED_VERSIONS:
+            return None
+        kv_count = struct.unpack_from("<Q", data, 16)[0]
+    except struct.error:
+        return None
+
+    fields: dict[str, object] = {}
+    off = 24
+    try:
+        for _ in range(min(kv_count, 4096)):
+            key, off = _read_gguf_string(data, off)
+            if key is None:
+                return None
+            if off + 4 > len(data):
+                return None
+            vtype = gguf.GGUFValueType(struct.unpack_from("<I", data, off)[0])
+            off += 4
+            value, off = _read_gguf_value(data, off, vtype)
+            if value is None:
+                return None
+            fields[key] = value
+    except (struct.error, ValueError):
+        return None
+
+    arch = fields.get("general.architecture")
+    if not isinstance(arch, str):
+        arch = None
+    prefix = arch or "llama"
+
+    def _int_key(*names: str) -> int | None:
+        for name in names:
+            value = fields.get(name)
+            if isinstance(value, int) and value > 0:
+                return value
+        return None
+
+    n_layer = _int_key(f"{prefix}.block_count", "llama.block_count")
+    n_embd = _int_key(f"{prefix}.embedding_length", "llama.embedding_length")
+    n_head = _int_key(f"{prefix}.attention.head_count", "llama.attention.head_count")
+    n_kv_head = _int_key(f"{prefix}.attention.head_count_kv", "llama.attention.head_count_kv")
+    context_length = _int_key(f"{prefix}.context_length", "llama.context_length")
+
+    if n_layer is None or n_embd is None or n_head is None:
+        return None  # no reliable KV estimate without the architecture numbers
+
+    return {
+        "n_layer": n_layer,
+        "n_embd": n_embd,
+        "n_head": n_head,
+        "n_kv_head": n_kv_head if n_kv_head is not None else n_head,
+        "context_length": context_length,
+        "architecture": arch,
+    }
+
+
+async def read_gguf_metadata(resolve_url: str) -> dict | None:
+    """Fetch and parse a GGUF file's header metadata.
+
+    Range-requests the first _GGUF_RANGE_BYTES of a resolve URL, then parses
+    the header. Any failure (network, non-2xx, bad magic, truncated KV) logs
+    a warning and returns None — never raises. Results are cached in-process
+    per URL for _GGUF_META_CACHE_TTL seconds so a repo's quants are not
+    re-read on every browser refresh.
+    """
+    cached = _gguf_meta_cache.get(resolve_url)
+    if cached is not None and time.monotonic() - cached[0] < _GGUF_META_CACHE_TTL:
+        return cached[1]
+
+    headers = {"Range": f"bytes=0-{_GGUF_RANGE_BYTES - 1}"}
+    if settings.HF_TOKEN:
+        headers["Authorization"] = f"Bearer {settings.HF_TOKEN}"
+
+    meta = None
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(resolve_url, headers=headers)
+            response.raise_for_status()
+        meta = _parse_gguf_header(response.content)
+    except Exception as e:  # noqa: BLE001 — a header read failure is never fatal
+        logger.warning("GGUF header read failed for %s: %r", resolve_url, e)
+        meta = None
+
+    _gguf_meta_cache[resolve_url] = (time.monotonic(), meta)
+    return meta
+
+
+# ---- GGUF-accurate fit scoring ----
+
+
+def estimate_gguf_fit(size_bytes: int, meta: dict | None, vram_free_mb: int | None, context_tokens: int) -> dict:
+    """Fit verdict for one GGUF quant against the probed VRAM.
+
+    Exact where the file allows: weights come from the file size, KV from the
+    file's own architecture numbers (llama.block_count etc.):
+
+      kv_bytes = 2 × n_layer × ctx × n_embd × KV_CACHE_BYTES_PER_ELEMENT
+                 × (n_kv_head / n_head)   # GQA ratio; 1 for MHA
+
+    No extra overhead multiplier — weights and KV are exact, so the 10%
+    FIT_SAFETY_MARGIN lives in the fits_fully threshold only. Verdicts:
+    fits_fully | fits_cpu_offload | likely_too_large | cpu_only | unknown.
+    """
+    weights_gb = size_bytes / 1e9
+
+    if meta is None:
+        return {
+            "verdict": "unknown",
+            "score": 0,
+            "need_gb": None,
+            "rationale": "couldn't read model metadata (GGUF header parse failed)",
+        }
+
+    gqa_ratio = (meta["n_kv_head"] / meta["n_head"]) if meta["n_head"] else 1.0
+    kv_bytes = (
+        2 * meta["n_layer"] * context_tokens * meta["n_embd"]
+        * settings.KV_CACHE_BYTES_PER_ELEMENT * gqa_ratio
+    )
+    kv_gb = kv_bytes / 1e9
+    need_gb = weights_gb + kv_gb
+
+    if vram_free_mb is None:
+        return {
+            "verdict": "cpu_only",
+            "score": 0,
+            "need_gb": round(need_gb, 1),
+            "rationale": (f"no GPU detected; ~{weights_gb:.1f} GB weights + ~{kv_gb:.1f} GB "
+                          f"KV cache (@{context_tokens} ctx) would be needed (CPU inference will be slow)"),
+        }
+
+    free_gb = vram_free_mb / 1024
+    score = min(100, round(100 * free_gb / need_gb))
+
+    if need_gb <= free_gb * (1 - settings.FIT_SAFETY_MARGIN):
+        verdict = "fits_fully"
+        rationale = (f"~{weights_gb:.1f} GB weights + ~{kv_gb:.1f} GB KV cache "
+                     f"(@{context_tokens} ctx) fits in {free_gb:.1f} GB free VRAM")
+    elif weights_gb <= free_gb * 1.5:
+        # weights alone exceed VRAM but the runtime can offload the overflow to
+        # RAM (llama.cpp / LM Studio partial offload); expect reduced speed
+        verdict = "fits_cpu_offload"
+        rationale = (f"~{weights_gb:.1f} GB weights exceed {free_gb:.1f} GB free VRAM — "
+                     f"partial GPU offload, expect reduced speed")
+    else:
+        verdict = "likely_too_large"
+        rationale = f"needs ~{need_gb:.1f} GB, only {free_gb:.1f} GB free VRAM"
+
+    return {
+        "verdict": verdict,
+        "score": score,
+        "need_gb": round(need_gb, 1),
+        "rationale": rationale,
+    }
+
+
+# ---- HF model detail (HF model browser) ----
+
+
+def _hf_auth_headers() -> dict:
+    return {"Authorization": f"Bearer {settings.HF_TOKEN}"} if settings.HF_TOKEN else {}
+
+
+def _parse_arch(repo_id: str) -> str | None:
+    rid = (repo_id or "").lower()
+    for arch in _KNOWN_ARCHS:
+        if arch in rid:
+            return arch
+    return None
+
+
+def _derive_capabilities(model: dict, description: str) -> list[str]:
+    """Best-effort capability pills scraped from tags/description/id."""
+    tags = {t.lower() for t in model.get("tags") or []}
+    capabilities = []
+    if tags & _VISION_TAGS or "vl" in (model.get("id") or "").lower():
+        capabilities.append("Vision")
+    if tags & _TOOL_TAGS:
+        capabilities.append("Tool Use")
+    if "reasoning" in tags or "reasoning" in (description or "").lower() or "reason" in (model.get("id") or "").lower():
+        capabilities.append("Reasoning")
+    return capabilities
+
+
+async def get_hf_model_detail(repo_id: str) -> dict | None:
+    """Full metadata for one HF repo from the Hub API.
+
+    Returns the fields the browser needs (stats, params, file list, capability
+    pills, format pills) or None on ANY failure — never raises. Files come
+    from the API's `siblings` array; a repo without siblings is unusable for
+    quant grouping and returns None.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"https://huggingface.co/api/models/{repo_id}",
+                headers=_hf_auth_headers(),
+            )
+            response.raise_for_status()
+        model = response.json()
+    except Exception as e:  # noqa: BLE001 — a detail failure is a 404, never a 500
+        logger.warning("Hugging Face model detail unavailable for %s: %r", repo_id, e)
+        return None
+
+    siblings = model.get("siblings")
+    if not isinstance(siblings, list) or not siblings:
+        return None
+
+    weights = model.get("safetensors") or {}
+    params_b = weights.get("parameters") if isinstance(weights, dict) else None
+    if params_b is None:
+        params_b = _parse_params_b(model.get("id", ""))
+    arch = weights.get("arch") if isinstance(weights, dict) else None
+    if not arch:
+        arch = _parse_arch(model.get("id", ""))
+
+    description = ""
+    card_data = model.get("cardData") or {}
+    if isinstance(card_data, dict):
+        description = card_data.get("text") or card_data.get("description") or ""
+
+    files = [{"filename": s.get("rfilename", ""), "size": s.get("size")} for s in siblings]
+
+    return {
+        "id": model.get("id", repo_id),
+        "downloads": model.get("downloads"),
+        "likes": model.get("likes"),
+        "lastModified": model.get("lastModified"),
+        "pipeline_tag": model.get("pipeline_tag"),
+        "library_name": model.get("library_name"),
+        "tags": model.get("tags") or [],
+        "description": description,
+        "params_b": params_b,
+        "arch": arch,
+        "files": files,
+        "capabilities": _derive_capabilities(model, description),
+        "formats": _derive_formats(files),
+    }
+
+
+def _derive_formats(files: list[dict]) -> list[str]:
+    """Format pills from the file list: GGUF quants, MLX weights."""
+    formats = []
+    if any(_GGUF_FILE_RE.search(f.get("filename", "")) for f in files):
+        formats.append("GGUF")
+    if any((".mlx" in f.get("filename", "") or "-mlx" in f.get("filename", "")) for f in files):
+        formats.append("MLX")
+    return formats
+
+
+async def build_hf_model_detail(repo_id: str, context_tokens: int) -> dict | None:
+    """Browser payload for one HF repo: stats + per-quant GGUF fit.
+
+    Probes hardware once, groups the repo's GGUF files into quant options,
+    and — for the first _QUANT_READ_CAP of them, smallest first — reads the
+    quant's header and computes a fit. Returns None when the repo detail
+    itself is unavailable (caller turns that into a 404).
+    """
+    detail = await get_hf_model_detail(repo_id)
+    if detail is None:
+        return None
+
+    hw = await probe_hardware()
+    vram_free_mb = None
+    if hw["gpu_available"]:
+        # single-GPU assumption: score against the card with the most free VRAM
+        vram_free_mb = max(g["vram_free_mb"] for g in hw["gpus"])
+
+    quants = group_gguf_quants(detail["files"])
+    scored = quants[:_QUANT_READ_CAP]  # bound header reads; cheapest first
+    for quant in scored:
+        first = quant["filenames"][0]
+        resolve_url = f"https://huggingface.co/{repo_id}/resolve/main/{first}"
+        meta = await read_gguf_metadata(resolve_url)
+        quant["fit"] = estimate_gguf_fit(quant["size_bytes"], meta, vram_free_mb, context_tokens)
+
+    return {
+        "repo_id": repo_id,
+        "downloads": detail["downloads"],
+        "likes": detail["likes"],
+        "last_modified": detail["lastModified"],
+        "description": detail["description"],
+        "params_b": detail["params_b"],
+        "arch": detail["arch"],
+        "pipeline_tag": detail["pipeline_tag"],
+        "library_name": detail["library_name"],
+        "capabilities": detail["capabilities"],
+        "formats": detail["formats"],
+        "quants": scored,
+        "has_gguf": bool(quants),
+        "context_tokens": context_tokens,
+        "hardware": hw,
     }

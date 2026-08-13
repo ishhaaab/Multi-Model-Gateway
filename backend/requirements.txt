@@ -57,6 +57,8 @@ ecdsa==0.19.2
     # via python-jose
 fastapi==0.141.1
     # via -r /app/requirements.in
+gguf==0.19.0
+    # via -r /app/requirements.in
 googleapis-common-protos==1.75.1
     # via opentelemetry-exporter-otlp-proto-http
 greenlet==3.5.4
@@ -103,6 +105,8 @@ mcp==2.0.0
     # via -r /app/requirements.in
 mcp-types==2.0.0
     # via mcp
+numpy==2.4.6
+    # via gguf
 nvidia-ml-py==13.610.43
     # via -r /app/requirements.in
 openai==2.53.0
@@ -180,6 +184,7 @@ python-multipart==0.0.32
 pyyaml==6.0.3
     # via
     #   -r /app/requirements.in
+    #   gguf
     #   uvicorn
 redis[asyncio,hiredis]==8.1.0
     # via
@@ -190,7 +195,9 @@ referencing==0.37.0
     #   jsonschema
     #   jsonschema-specifications
 requests==2.34.2
-    # via opentelemetry-exporter-otlp-proto-http
+    # via
+    #   gguf
+    #   opentelemetry-exporter-otlp-proto-http
 rpds-py==2026.6.3
     # via
     #   jsonschema
@@ -216,7 +223,9 @@ starlette==1.5.1
     #   prometheus-fastapi-instrumentator
     #   sse-starlette
 tqdm==4.70.0
-    # via openai
+    # via
+    #   gguf
+    #   openai
 truststore==0.10.4
     # via
     #   httpcore2

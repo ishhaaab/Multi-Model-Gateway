@@ -1029,3 +1029,64 @@ apples-to-apples.
   second fetch, `build_hf_cookbook` scores/sorts entries, and
   `estimate_fit` with no quant uses `DEFAULT_BYTES_PER_PARAM`. Full suite:
   158 tests pass (was 151).
+
+## HF model browser + GGUF-accurate fit (F1) — DONE
+
+The Cookbook's HF tab gains a per-model browser: `GET /v1/hf/models/{repo_id}`
+returns one HF repo's stats plus a per-quant VRAM fit computed from the GGUF
+files' **own headers** — the KV estimate stops being the 128KB-per-7B ballpark
+and becomes exact (real `n_layer`/`n_embd`/`n_head[_kv]`).
+
+- **Config** (`core/config.py`) — `HF_TOKEN` (optional; empty = anonymous,
+  enables gated repos + higher rate limits), `KV_CACHE_BYTES_PER_ELEMENT`
+  (2.0 = f16 default), `FIT_SAFETY_MARGIN` (0.10).
+- **GGUF header read** (`services/fit_score.py`) — `read_gguf_metadata`
+  Range-requests the first `_GGUF_RANGE_BYTES` (4 MB) of a resolve URL
+  (`Authorization: Bearer <HF_TOKEN>` when set, 15s timeout) and walks the
+  header: magic/version/tensor+KV counts, then the KV section
+  (`general.architecture`, `<arch>.block_count`, `.embedding_length`,
+  `.attention.head_count[_kv]`, `.context_length`; `n_kv_head` defaults to
+  `n_head`). The walker uses `gguf`'s constants (`GGUF_MAGIC`,
+  `GGUFValueType`, supported versions [2, 3]) instead of `GGUFReader`,
+  because GGUFReader needs a real file path (it `np.memmap`s) and eagerly
+  reads every tensor's data — on a partial 4 MB body it raises in
+  `_build_tensors` before `fields` is reachable. Any failure returns None
+  (never raises); results cached in-process per URL for 600s.
+- **KV formula** (exact) —
+  `kv_bytes = 2 × n_layer × ctx × n_embd × KV_CACHE_BYTES_PER_ELEMENT × (n_kv_head / n_head)`;
+  `need_gb = weights_gb + kv_gb` with **no** extra 1.1 multiplier (weights
+  are the exact file size, KV is exact; the 10% safety margin lives in the
+  `fits_fully` threshold only).
+- **Verdict taxonomy** — `fits_fully` (need ≤ free × (1 − margin)),
+  `fits_cpu_offload` (weights ≤ free × 1.5 — the runtime offloads the
+  overflow to RAM; note: "partial GPU offload — expect reduced speed"),
+  `likely_too_large`, `cpu_only` (no GPU detected), `unknown` (header parse
+  failed — never a wrong verdict). `score = min(100, 100 × free/need)`.
+- **Quant grouping** — `group_gguf_quants` collapses a repo's sibling files
+  into one entry per quant token (`_QUANT_RE`, e.g. "Q4_K_M"/"Q8_0"/"Q1_0"),
+  summing shard sizes (`_SHARD_RE` `-00001-of-00003.gguf`), ignoring
+  non-GGUF files, sorted by size ascending; the header-read cap
+  (`_QUANT_READ_CAP` = 12) bounds metadata fetches to the cheapest quants.
+- **Capability/format pills** — best-effort tag scrape: Vision
+  (`image-text-to-text`, `visual-question-answering`, `image-to-text`,
+  `any-to-text`, `multimodal`, `vision`, or "vl" in the repo id), Tool Use
+  (`function-calling`/`tool-calling`/`tools` tags), Reasoning (tag /
+  description / "reason" in id); formats GGUF (any `.gguf` file) and MLX
+  (`.mlx`/`-mlx` file). Often empty — the API's tags are thin.
+- **Router** (`routers/hf.py`) — `GET /v1/hf/models/{repo_id:path}` (auth via
+  `get_current_user`; `context_tokens` 512–262144, default
+  `COOKBOOK_CONTEXT_TOKENS`; `{repo_id:path}` because HF ids contain a `/`;
+  the static `/hf/models` list route is matched first — no conflict). Detail
+  or hardware failure → `404 "model not found or unavailable"`.
+- **Deferred** — no download/install: the browser only reads headers over
+  Range requests and shows fits. Installing a quant from the UI is out of
+  scope for F1.
+- **Tests** — `backend/tests/test_hf_detail.py` (stdlib unittest, skip-import
+  pattern; 18 cases): quant grouping (singles/shards/non-GGUF/sort), quant
+  regex extraction, `estimate_gguf_fit` arithmetic (4.7 GB + GQA 32/8 @ 8k on
+  6 GB → `fits_cpu_offload`, 29 GB → `likely_too_large`, meta-None →
+  `unknown`, no-GPU → `cpu_only`), the header walker (real layout + bad magic
+  + truncation + missing `n_kv_head` default), `read_gguf_metadata` (Range
+  header sent, failures cached), and `build_hf_model_detail` end-to-end
+  (mocked Hub API + mocked header reads → quants with per-quant fit,
+  capabilities, formats). Full suite: 176 tests pass (was 158).

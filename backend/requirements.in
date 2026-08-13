@@ -43,6 +43,7 @@ mcp
 
 # Hardware probe / VRAM fit-score
 nvidia-ml-py
+gguf                  # GGUF header reader for HF quant fit estimates (ggml-org/gguf)
 
 # Observability
 langfuse

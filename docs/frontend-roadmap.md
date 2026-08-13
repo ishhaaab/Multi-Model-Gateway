@@ -273,6 +273,31 @@ heuristic as the local catalog. New backend contract:
   were added to `frontend/src/lib/types.ts` + `api-endpoints.ts`. The mobile
   port must mirror the tab UI and the nullable `need_gb`/`params_b` handling.
 
+### HF model detail endpoint (per-quant GGUF fit) — backend DONE, SPA NOT STARTED
+
+The browser's per-model view has a new backend contract (F1). New endpoint +
+response shapes for the model detail screen:
+
+- **`GET /v1/hf/models/{repo_id}`** (auth required, plain JSON) — repo id is
+  path-encoded (`org/model`). Query param: `context_tokens` (512–262144,
+  optional; defaults to `COOKBOOK_CONTEXT_TOKENS`).
+- **Response shape `HfModelDetailResponse`:** `{repo_id, downloads, likes,
+  last_modified, description, params_b, arch, pipeline_tag, library_name,
+  capabilities: string[], formats: string[] ("GGUF"/"MLX"), quants:
+  QuantFit[], has_gguf: bool, context_tokens, hardware}` — `hardware` is the
+  same shape as `/v1/cookbook`.
+- **`QuantFit`:** `{quant, size_bytes, filenames: string[], is_sharded: bool,
+  fit: {verdict, score, need_gb, rationale}}`. Verdicts to map to badges:
+  `fits_fully` (green), `fits_cpu_offload` (yellow, "partial GPU offload —
+  expect reduced speed"), `likely_too_large` (red), `cpu_only` (gray), and
+  `unknown` (gray, "couldn't read model metadata").
+- **Capabilities** are a best-effort tag scrape (Vision/Tool Use/Reasoning)
+  and are often empty — render the list only when non-empty.
+- **SPA status: NOT STARTED.** The cookbook's HF tab lists repos via
+  `hfApi.models`; a detail view would call a new `hfApi.modelDetail(repo_id,
+  context_tokens)` and render the quants table (quant badge, total GB,
+  shard count, fit badge + rationale). Mobile must mirror it.
+
 ## Phases
 
 ### Phase 1 — Scaffold + contract layer + auth

@@ -122,6 +122,15 @@ class Settings(BaseSettings):
     EMBED_DIM: int = 768
     COOKBOOK_CONTEXT_TOKENS: int = 8192    # context size assumed for KV-cache estimates
 
+    # Hugging Face model browser (F1): optional token for higher rate limits +
+    # gated repos (empty = anonymous). The LoRA trainer also reads HF_TOKEN.
+    HF_TOKEN: str = ""
+    # bytes per KV-cache element for the GGUF fit formula (f16 = 2 bytes; verify
+    # against the runtime — LM Studio / llama.cpp report their KV type)
+    KV_CACHE_BYTES_PER_ELEMENT: float = 2.0
+    # headroom applied to the "fits fully" verdict threshold (0.10 = 10%)
+    FIT_SAFETY_MARGIN: float = 0.10
+
     DATABASE_URL: str
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 10
