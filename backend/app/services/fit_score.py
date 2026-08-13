@@ -9,8 +9,10 @@ a promise:
   kv_gb      ≈ ctx_tokens × 128 KB × (params_b / 7)   # GQA-era ballpark
   need_gb    ≈ (weights + kv) × 1.1                   # runtime overhead
 
-Verdicts: fits_fully (need ≤ free VRAM), partial_offload (≥40% of the
-weights fit), wont_fit, cpu_only (no GPU detected).
+Verdicts are scored against TOTAL VRAM (not free), and factor RAM offload:
+fits_fully (need ≤ total VRAM × (1-margin)), partial_offload (overflows total
+VRAM but the weights/need fit in VRAM + RAM), wont_fit (too large even with
+offload), cpu_only (no GPU detected).
 
 The HF model browser (F1) is exact where it can be: for GGUF repos it reads
 the quant file's own header (llama.block_count / embedding_length /
@@ -162,7 +164,7 @@ async def get_local_models() -> list[dict]:
     return models
 
 
-def estimate_fit(model: dict, vram_free_mb: int | None, context_tokens: int) -> dict:
+def estimate_fit(model: dict, vram_total_mb: int | None, ram_total_mb: int | None, context_tokens: int) -> dict:
     params_b = model.get("params_b")
 
     if model.get("size_bytes"):
@@ -183,7 +185,7 @@ def estimate_fit(model: dict, vram_free_mb: int | None, context_tokens: int) -> 
     kv_gb = context_tokens * 128e3 * ((params_b or 7) / 7) / 1e9
     need_gb = (weights_gb + kv_gb) * 1.1
 
-    if vram_free_mb is None:
+    if vram_total_mb is None:
         return {
             "verdict": "cpu_only",
             "score": 0,
@@ -191,20 +193,31 @@ def estimate_fit(model: dict, vram_free_mb: int | None, context_tokens: int) -> 
             "rationale": f"no GPU detected; ~{need_gb:.1f} GB would be needed at {context_tokens} ctx (CPU inference will be slow)",
         }
 
-    free_gb = vram_free_mb / 1024
-    score = min(100, round(100 * free_gb / need_gb))
+    vram_gb = vram_total_mb / 1024
+    score = min(100, round(100 * vram_gb / need_gb))
 
-    if need_gb <= free_gb:
+    if need_gb <= vram_gb * (1 - settings.FIT_SAFETY_MARGIN):
         verdict = "fits_fully"
         rationale = (f"~{weights_gb:.1f} GB weights + ~{kv_gb:.1f} GB KV cache "
-                     f"(@{context_tokens} ctx) fits in {free_gb:.1f} GB free VRAM")
-    elif free_gb >= weights_gb * 0.4:
-        verdict = "partial_offload"
-        rationale = (f"needs ~{need_gb:.1f} GB but only {free_gb:.1f} GB free — "
-                     f"partial GPU offload, expect reduced speed")
+                     f"(@{context_tokens} ctx) fits in {vram_gb:.1f} GB VRAM")
     else:
-        verdict = "wont_fit"
-        rationale = f"needs ~{need_gb:.1f} GB, only {free_gb:.1f} GB free VRAM"
+        if ram_total_mb is not None:
+            ram_gb = ram_total_mb / 1024
+            offloadable = (weights_gb <= ram_gb) and (need_gb <= vram_gb + ram_gb)
+        else:
+            offloadable = need_gb <= vram_gb * 2.0
+        if offloadable:
+            verdict = "partial_offload"
+            if weights_gb > vram_gb:
+                rationale = (f"~{weights_gb:.1f} GB weights exceed {vram_gb:.1f} GB VRAM — "
+                             f"partial GPU offload to RAM, expect reduced speed")
+            else:
+                rationale = (f"~{weights_gb:.1f} GB weights fit in VRAM but the "
+                             f"~{need_gb:.1f} GB working set exceeds it — partial GPU "
+                             f"offload (KV cache overflow), expect reduced speed")
+        else:
+            verdict = "wont_fit"
+            rationale = f"needs ~{need_gb:.1f} GB — too large for {vram_gb:.1f} GB VRAM even with RAM offload"
 
     return {
         "verdict": verdict,
@@ -216,14 +229,15 @@ def estimate_fit(model: dict, vram_free_mb: int | None, context_tokens: int) -> 
 
 async def build_cookbook(hardware: dict, context_tokens: int | None = None) -> dict:
     context_tokens = context_tokens or settings.COOKBOOK_CONTEXT_TOKENS
-    vram_free_mb = None
+    vram_total_mb = None
     if hardware["gpu_available"]:
-        # single-GPU assumption: score against the card with the most free VRAM
-        vram_free_mb = max(g["vram_free_mb"] for g in hardware["gpus"])
+        # single-GPU assumption: score against the card with the most total VRAM
+        vram_total_mb = max(g["vram_total_mb"] for g in hardware["gpus"])
+    ram_total_mb = hardware.get("ram_total_mb")
 
     entries = []
     for model in await get_local_models():
-        fit = estimate_fit(model, vram_free_mb, context_tokens)
+        fit = estimate_fit(model, vram_total_mb, ram_total_mb, context_tokens)
         entries.append({**{k: v for k, v in model.items() if k != "size_bytes"}, **fit})
 
     entries.sort(key=lambda e: (_VERDICT_RANK.get(e["verdict"], 5), -e["score"]))
@@ -294,14 +308,15 @@ async def build_hf_cookbook(hardware: dict, context_tokens: int, search: str = "
     two tables rank apples-to-apples. Response mirrors the local cookbook but
     with a `search` echo and `count` instead of a recommendation.
     """
-    vram_free_mb = None
+    vram_total_mb = None
     if hardware["gpu_available"]:
-        # single-GPU assumption: score against the card with the most free VRAM
-        vram_free_mb = max(g["vram_free_mb"] for g in hardware["gpus"])
+        # single-GPU assumption: score against the card with the most total VRAM
+        vram_total_mb = max(g["vram_total_mb"] for g in hardware["gpus"])
+    ram_total_mb = hardware.get("ram_total_mb")
 
     entries = []
     for model in await get_hf_models(search, limit):
-        fit = estimate_fit(model, vram_free_mb, context_tokens)
+        fit = estimate_fit(model, vram_total_mb, ram_total_mb, context_tokens)
         entries.append({**{k: v for k, v in model.items() if k != "size_bytes"}, **fit})
 
     entries.sort(key=lambda e: (_VERDICT_RANK.get(e["verdict"], 5), -e["score"]))
@@ -528,8 +543,8 @@ async def read_gguf_metadata(resolve_url: str) -> dict | None:
 # ---- GGUF-accurate fit scoring ----
 
 
-def estimate_gguf_fit(size_bytes: int, meta: dict | None, vram_free_mb: int | None, context_tokens: int) -> dict:
-    """Fit verdict for one GGUF quant against the probed VRAM.
+def estimate_gguf_fit(size_bytes: int, meta: dict | None, vram_total_mb: int | None, ram_total_mb: int | None, context_tokens: int) -> dict:
+    """Fit verdict for one GGUF quant against the probed VRAM (+ RAM offload).
 
     Exact where the file allows: weights come from the file size, KV from the
     file's own architecture numbers (llama.block_count etc.):
@@ -559,7 +574,7 @@ def estimate_gguf_fit(size_bytes: int, meta: dict | None, vram_free_mb: int | No
     kv_gb = kv_bytes / 1e9
     need_gb = weights_gb + kv_gb
 
-    if vram_free_mb is None:
+    if vram_total_mb is None:
         return {
             "verdict": "cpu_only",
             "score": 0,
@@ -568,22 +583,33 @@ def estimate_gguf_fit(size_bytes: int, meta: dict | None, vram_free_mb: int | No
                           f"KV cache (@{context_tokens} ctx) would be needed (CPU inference will be slow)"),
         }
 
-    free_gb = vram_free_mb / 1024
-    score = min(100, round(100 * free_gb / need_gb))
+    vram_gb = vram_total_mb / 1024
+    score = min(100, round(100 * vram_gb / need_gb))
 
-    if need_gb <= free_gb * (1 - settings.FIT_SAFETY_MARGIN):
+    if need_gb <= vram_gb * (1 - settings.FIT_SAFETY_MARGIN):
         verdict = "fits_fully"
         rationale = (f"~{weights_gb:.1f} GB weights + ~{kv_gb:.1f} GB KV cache "
-                     f"(@{context_tokens} ctx) fits in {free_gb:.1f} GB free VRAM")
-    elif weights_gb <= free_gb * 1.5:
-        # weights alone exceed VRAM but the runtime can offload the overflow to
-        # RAM (llama.cpp / LM Studio partial offload); expect reduced speed
-        verdict = "fits_cpu_offload"
-        rationale = (f"~{weights_gb:.1f} GB weights exceed {free_gb:.1f} GB free VRAM — "
-                     f"partial GPU offload, expect reduced speed")
+                     f"(@{context_tokens} ctx) fits in {vram_gb:.1f} GB VRAM")
     else:
-        verdict = "likely_too_large"
-        rationale = f"needs ~{need_gb:.1f} GB, only {free_gb:.1f} GB free VRAM"
+        if ram_total_mb is not None:
+            ram_gb = ram_total_mb / 1024
+            offloadable = (weights_gb <= ram_gb) and (need_gb <= vram_gb + ram_gb)
+        else:
+            offloadable = need_gb <= vram_gb * 2.0
+        if offloadable:
+            # weights/need overflow VRAM but the runtime can offload the overflow
+            # to RAM (llama.cpp / LM Studio partial offload); expect reduced speed
+            verdict = "fits_cpu_offload"
+            if weights_gb > vram_gb:
+                rationale = (f"~{weights_gb:.1f} GB weights exceed {vram_gb:.1f} GB VRAM — "
+                             f"partial GPU offload to RAM, expect reduced speed")
+            else:
+                rationale = (f"~{weights_gb:.1f} GB weights fit in VRAM but the "
+                             f"~{need_gb:.1f} GB working set exceeds it — partial GPU "
+                             f"offload (KV cache overflow), expect reduced speed")
+        else:
+            verdict = "likely_too_large"
+            rationale = f"needs ~{need_gb:.1f} GB — too large for {vram_gb:.1f} GB VRAM even with RAM offload"
 
     return {
         "verdict": verdict,
@@ -700,10 +726,11 @@ async def build_hf_model_detail(repo_id: str, context_tokens: int) -> dict | Non
         return None
 
     hw = await probe_hardware()
-    vram_free_mb = None
+    vram_total_mb = None
     if hw["gpu_available"]:
-        # single-GPU assumption: score against the card with the most free VRAM
-        vram_free_mb = max(g["vram_free_mb"] for g in hw["gpus"])
+        # single-GPU assumption: score against the card with the most total VRAM
+        vram_total_mb = max(g["vram_total_mb"] for g in hw["gpus"])
+    ram_total_mb = hw.get("ram_total_mb")
 
     quants = group_gguf_quants(detail["files"])
     scored = quants[:_QUANT_READ_CAP]  # bound header reads; cheapest first
@@ -711,7 +738,7 @@ async def build_hf_model_detail(repo_id: str, context_tokens: int) -> dict | Non
         first = quant["filenames"][0]
         resolve_url = f"https://huggingface.co/{repo_id}/resolve/main/{first}"
         meta = await read_gguf_metadata(resolve_url)
-        quant["fit"] = estimate_gguf_fit(quant["size_bytes"], meta, vram_free_mb, context_tokens)
+        quant["fit"] = estimate_gguf_fit(quant["size_bytes"], meta, vram_total_mb, ram_total_mb, context_tokens)
 
     return {
         "repo_id": repo_id,

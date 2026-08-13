@@ -24,12 +24,12 @@ export default function ModelsPage() {
 
   // Top-level tabs — the Models window unifies the old Cookbook page (Local:
   // installed models + fit check) and the HF model browser (Cloud) under one
-  // page with a shared hardware strip pinned at the bottom.
+  // page with a shared hardware chip in the tab bar.
   const [tab, setTab] = useState<Tab>("local");
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Bottom hardware strip — fetched once on mount and again on Refresh.
+  // Hardware chip (top tab bar) — fetched once on mount and again on Refresh.
   const [hardware, setHardware] = useState<HardwareInfo | null>(null);
   const [hardwareLoading, setHardwareLoading] = useState(true);
 
@@ -178,7 +178,7 @@ export default function ModelsPage() {
     }
   };
 
-  // Refresh refetches the active tab + the bottom hardware strip.
+  // Refresh refetches the active tab + the hardware chip.
   const refresh = () => {
     setRefreshing(true);
     setHardwareLoading(true);
@@ -198,6 +198,12 @@ export default function ModelsPage() {
     }
     void Promise.allSettled(jobs).then(() => setRefreshing(false));
   };
+
+  // Primary GPU for the chip — the card with the most total VRAM (mirrors the
+  // backend's single-GPU fit assumption of max total VRAM).
+  const primaryGpu = hardware?.gpus?.length
+    ? hardware.gpus.reduce((a, b) => (b.vram_total_mb > a.vram_total_mb ? b : a))
+    : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -219,8 +225,8 @@ export default function ModelsPage() {
         </Button>
       </header>
 
-      {/* Tab control — Local | Cloud */}
-      <div className="flex flex-wrap gap-1.5 border-b border-border px-6 py-3">
+      {/* Tab control — Local | Cloud, with the hardware chip on the right */}
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-6 py-3">
         {(
           [
             { id: "local", label: "Local" },
@@ -240,10 +246,36 @@ export default function ModelsPage() {
             {t.label}
           </button>
         ))}
+
+        {/* Detected hardware chip — name · total VRAM · total RAM (no free-VRAM
+            metric). Shared across both tabs. */}
+        <div className="ml-auto flex items-center">
+          {hardwareLoading && !hardware ? (
+            <Skeleton className="h-5 w-40" />
+          ) : !hardware?.gpu_available || !primaryGpu ? (
+            <span className="flex items-center gap-1.5 text-[0.8125rem] text-text-muted">
+              <Cpu size={13} className="text-accent-primary" />
+              No GPU detected
+            </span>
+          ) : (
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-tertiary px-3 py-1.5">
+              <Cpu size={13} className="text-accent-primary" />
+              <span
+                className="max-w-[200px] truncate text-[0.8125rem] font-medium text-text-primary"
+                title={primaryGpu.name}
+              >
+                {primaryGpu.name}
+              </span>
+              <span className="whitespace-nowrap font-mono text-[0.75rem] text-text-secondary">
+                {gb(primaryGpu.vram_total_mb)} VRAM
+                {hardware.ram_total_mb != null ? ` + ${gb(hardware.ram_total_mb)} RAM` : ""}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Scrollable body — renders the active tab; the hardware strip below is
-          pinned so it stays visible while this area scrolls. */}
+      {/* Scrollable body — renders the active tab. */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === "cloud" ? (
           <div className="grid h-full min-h-0 grid-cols-[minmax(320px,380px)_1fr] max-lg:grid-cols-1 max-lg:overflow-y-auto">
@@ -279,46 +311,6 @@ export default function ModelsPage() {
           <LocalModels refreshKey={refreshKey} />
         )}
       </div>
-
-      {/* Bottom hardware strip — compact single row, persistent across tabs */}
-      <footer className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border bg-bg-secondary/40 px-6 py-2.5">
-        <span className="flex shrink-0 items-center gap-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-text-muted">
-          <Cpu size={13} className="text-accent-primary" />
-          Detected hardware
-        </span>
-        {hardwareLoading && !hardware ? (
-          <Skeleton className="h-5 w-64" />
-        ) : !hardware?.gpu_available || hardware.gpus.length === 0 ? (
-          <span className="text-[0.8125rem] text-text-muted">No GPU detected</span>
-        ) : (
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5">
-            {hardware.gpus.map((g) => {
-              const usedPct = g.vram_total_mb
-                ? Math.round(((g.vram_total_mb - g.vram_free_mb) / g.vram_total_mb) * 100)
-                : 0;
-              return (
-                <div key={g.index} className="flex min-w-0 items-center gap-2">
-                  <span
-                    className="max-w-[240px] truncate text-[0.8125rem] font-medium text-text-primary"
-                    title={g.name}
-                  >
-                    {g.name}
-                  </span>
-                  <span className="whitespace-nowrap font-mono text-[0.75rem] text-text-secondary">
-                    {gb(g.vram_free_mb)} free / {gb(g.vram_total_mb)}
-                  </span>
-                  <div className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-bg-tertiary">
-                    <div
-                      className="h-full rounded-full bg-accent-primary"
-                      style={{ width: `${usedPct}%` }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </footer>
     </div>
   );
 }

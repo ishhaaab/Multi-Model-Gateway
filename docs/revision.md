@@ -1090,7 +1090,7 @@ The worker publishes JSON events to channel `research:{job_id}`:
 ### `services/hardware.py` — the probe
 
 ```python
-probe_hardware() → {"gpu_available": bool, "gpus": [{index, name, vram_total_mb, vram_free_mb}]}
+probe_hardware() → {"gpu_available": bool, "gpus": [{index, name, vram_total_mb, vram_free_mb}], "ram_total_mb": int | None}
 ```
 
 Two attempts, then graceful surrender: **pynvml** (NVML bindings — needs the NVIDIA driver visible in the container, i.e. compose `gpus: all` + nvidia-container-toolkit) → **`nvidia-smi` subprocess** (`--query-gpu=name,memory.total,memory.free --format=csv`, 10s timeout) → `{"gpu_available": false}`. Every failure path is caught; the endpoint never 500s for "no GPU".
@@ -1109,9 +1109,9 @@ kv_gb      ≈ ctx_tokens × 128 KB × (params_b / 7)        # GQA-era ballpark
 need_gb    ≈ (weights + kv) × 1.1                        # runtime overhead
 ```
 
-**Verdicts:** `fits_fully` (need ≤ free) · `partial_offload` (≥40% of weights fit — usable with CPU offload, slower) · `wont_fit` · `cpu_only` (no GPU) · `unknown` (couldn't size the model). Score = `min(100, 100 × free/need)`. Every verdict carries a one-line human rationale ("~4.8 GB weights + ~1.5 GB KV cache (@8192 ctx) fits in 5.9 GB free VRAM").
+**Verdicts:** `fits_fully` (need ≤ total VRAM × (1−margin)) · `partial_offload` (overflows total VRAM but fits via RAM offload — weights ≤ RAM and need ≤ VRAM + RAM, slower) · `wont_fit` (too large even with offload) · `cpu_only` (no GPU) · `unknown` (couldn't size the model). Score = `min(100, 100 × total_vram/need)`. Every verdict carries a one-line human rationale ("~4.8 GB weights + ~1.5 GB KV cache (@8192 ctx) fits in 5.9 GB VRAM").
 
-**`build_cookbook`** scores every model against the GPU with the most free VRAM (single-GPU assumption), sorts by verdict rank then score, and recommends the top entry if it at least partially fits.
+**`build_cookbook`** scores every model against the GPU with the most total VRAM (single-GPU assumption), factors `ram_total_mb` into RAM-offload verdicts, sorts by verdict rank then score, and recommends the top entry if it at least partially fits.
 
 ### `routers/hardware.py`
 
@@ -1792,7 +1792,7 @@ Races considered: (1) **Late subscriber** — the client connects after the job 
 
 **A:** I won't defend the number — I'll defend the *labeling*. It's an explicit heuristic: weights from file size when Ollama reports it, else `params × bytes/param` from a quantization table (q4≈0.60, q8≈1.10, f16=2.0 bytes/param, params parsed from the model name); KV cache as `ctx_tokens × 128KB × (params/7B)` — a GQA-era ballpark; ×1.1 for runtime overhead. Real usage varies with attention implementation, GQA head counts, context actually used, and runtime allocator behavior.
 
-The design choices that make a rough number useful: verdict **bands** (`fits_fully` / `partial_offload` / `wont_fit`) rather than false precision; a `?context_tokens=` knob because KV cache dominates at long context and users should see that; every verdict carries a human-readable rationale showing the arithmetic; and unknown-size models are labeled `unknown` instead of guessed. When the heuristic misclassifies a borderline model, the bands fail soft — `partial_offload` at 40%+ weight-fit still runs, just slower.
+The design choices that make a rough number useful: verdict **bands** (`fits_fully` / `partial_offload` / `wont_fit`) rather than false precision; a `?context_tokens=` knob because KV cache dominates at long context and users should see that; every verdict carries a human-readable rationale showing the arithmetic; and unknown-size models are labeled `unknown` instead of guessed. When the heuristic misclassifies a borderline model, the bands fail soft — `partial_offload` (weights ≤ RAM and need ≤ VRAM + RAM) still runs, just slower.
 
 ---
 

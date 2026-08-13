@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-13 — Fit scoring: total VRAM + RAM offload; hardware chip
+
+- Backend: fit verdicts (local cookbook + HF browser) now score against TOTAL VRAM and factor RAM offload instead of free VRAM; `/v1/hardware` adds `ram_total_mb`. Frontend: the Models window hardware chip moved to the top tab bar showing "name · total VRAM · total RAM" (no free-VRAM metric / usage bar).
+
 ## 2026-08-13 — Unified "Models" window (Local | Cloud)
 
 - Frontend: unified single "Models" window — Local | Cloud tabs, Cloud = two-pane HF browser (per-quant GGUF fit), Local = installed-model fit list, compact hardware box at bottom. Removed the separate Cookbook page.

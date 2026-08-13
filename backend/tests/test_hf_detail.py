@@ -172,37 +172,51 @@ class EstimateGgufFitTests(unittest.TestCase):
     META = {"n_layer": 32, "n_embd": 4096, "n_head": 32, "n_kv_head": 8, "context_length": 8192, "architecture": "llama"}
 
     def test_missing_meta_is_unknown(self):
-        fit = fit_score.estimate_gguf_fit(4_700_000_000, None, 6144, 8192)
+        fit = fit_score.estimate_gguf_fit(4_700_000_000, None, 6144, None, 8192)
         self.assertEqual(fit["verdict"], "unknown")
         self.assertIsNone(fit["need_gb"])
 
     def test_no_gpu_is_cpu_only(self):
-        fit = fit_score.estimate_gguf_fit(4_700_000_000, self.META, None, 8192)
+        fit = fit_score.estimate_gguf_fit(4_700_000_000, self.META, None, None, 8192)
         self.assertEqual(fit["verdict"], "cpu_only")
         self.assertIsInstance(fit["need_gb"], float)
 
     def test_29gb_on_6gb_is_likely_too_large(self):
-        fit = fit_score.estimate_gguf_fit(29_000_000_000, self.META, 6144, 8192)
+        fit = fit_score.estimate_gguf_fit(29_000_000_000, self.META, 6144, None, 8192)
         self.assertEqual(fit["verdict"], "likely_too_large")
 
     def test_exact_kv_arithmetic_and_verdict(self):
-        """4.7 GB weights, GQA 32/8, 8k ctx on 6 GB VRAM: KV is exact (not the
-        old 128KB-per-7B ballpark), so the verdict falls to fits_cpu_offload."""
+        """4.7 GB weights, GQA 32/8, 8k ctx on 6 GB total VRAM: KV is exact (not
+        the old 128KB-per-7B ballpark), so the verdict falls to fits_cpu_offload."""
         kv_bytes = (
             2 * 32 * 8192 * 4096 * fit_score.settings.KV_CACHE_BYTES_PER_ELEMENT * (8 / 32)
         )
         kv_gb = kv_bytes / 1e9
         need_gb = 4.7 + kv_gb
-        fit = fit_score.estimate_gguf_fit(4_700_000_000, self.META, 6144, 8192)
+        fit = fit_score.estimate_gguf_fit(4_700_000_000, self.META, 6144, None, 8192)
         self.assertEqual(fit["need_gb"], round(need_gb, 1))
-        # free 6 GB * 0.9 margin = 5.4 < need (~5.77) but weights 4.7 <= 6*1.5
+        # 6 GB total VRAM * 0.9 margin = 5.4 < need (~5.77); offload need <= 6*2
         self.assertEqual(fit["verdict"], "fits_cpu_offload")
         self.assertEqual(fit["score"], min(100, round(100 * 6 / need_gb)))
 
     def test_fits_fully_with_headroom(self):
         """Small quant + big VRAM clears the 10% margin → fits_fully."""
-        fit = fit_score.estimate_gguf_fit(2_000_000_000, self.META, 20480, 8192)
+        fit = fit_score.estimate_gguf_fit(2_000_000_000, self.META, 20480, None, 8192)
         self.assertEqual(fit["verdict"], "fits_fully")
+
+    def test_10gb_offloads_to_32gb_ram(self):
+        """10 GB weights (≤ 32 GB RAM) and need ≤ 8 GB VRAM + 32 GB RAM →
+        fits_cpu_offload."""
+        fit = fit_score.estimate_gguf_fit(10_000_000_000, self.META, 8192, 32768, 8192)
+        self.assertEqual(fit["verdict"], "fits_cpu_offload")
+        # weights (10 GB) > VRAM (8 GB) → the "weights exceed" branch, not KV overflow
+        self.assertIn("weights exceed", fit["rationale"])
+
+    def test_50gb_weights_exceed_ram_and_combined(self):
+        """50 GB weights exceed 32 GB RAM and the 40 GB combined budget →
+        likely_too_large."""
+        fit = fit_score.estimate_gguf_fit(50_000_000_000, self.META, 8192, 32768, 8192)
+        self.assertEqual(fit["verdict"], "likely_too_large")
 
 
 class GgufHeaderParseTests(unittest.TestCase):
@@ -441,7 +455,7 @@ class BuildHfModelDetailTests(unittest.TestCase):
         })
         hw = {"gpu_available": True, "gpus": [
             {"index": 0, "name": "Test GPU", "vram_total_mb": 8192, "vram_free_mb": 6144},
-        ]}
+        ], "ram_total_mb": 32768}
         meta_mock = AsyncMock(return_value=BuildHfModelDetailTests.META)
 
         async def run():
@@ -470,7 +484,7 @@ class BuildHfModelDetailTests(unittest.TestCase):
         self.assertEqual(q4["size_bytes"], 4_200_000_000)
         self.assertTrue(q4["is_sharded"])
         self.assertEqual(len(q4["filenames"]), 3)
-        # 4.2 GB weights + 1.07 GB KV = 5.27 GB <= 6.0 GB * 0.9 margin
+        # 4.2 GB weights + 1.07 GB KV = 5.27 GB <= 8.0 GB total VRAM * 0.9 margin
         self.assertEqual(q4["fit"]["verdict"], "fits_fully")
         self.assertEqual(result["quants"][1]["quant"], "Q8_0")
         self.assertFalse(result["quants"][1]["is_sharded"])

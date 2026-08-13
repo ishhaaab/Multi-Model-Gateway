@@ -1005,8 +1005,9 @@ apples-to-apples.
   `[]` — the endpoint never raises. Results are cached in-process for 600s
   (`_hf_cache` keyed by `(search, limit)`, `_cache_get`/`_cache_set`).
 - **`build_hf_cookbook(hardware, context_tokens, search, limit)`** — same
-  VRAM logic as `build_cookbook` (max free VRAM across GPUs when
-  `gpu_available`), runs each entry through `estimate_fit`, and sorts with
+  VRAM logic as `build_cookbook` (max total VRAM across GPUs + `ram_total_mb`
+  for RAM-offload verdicts when `gpu_available`), runs each entry through
+  `estimate_fit`, and sorts with
   the same verdict order. The rank dict is factored to a module constant
   `_VERDICT_RANK` used by BOTH cookbook builders. Response:
   `{hardware, context_tokens, search, models, count}` (no recommendation —
@@ -1057,11 +1058,13 @@ and becomes exact (real `n_layer`/`n_embd`/`n_head[_kv]`).
   `need_gb = weights_gb + kv_gb` with **no** extra 1.1 multiplier (weights
   are the exact file size, KV is exact; the 10% safety margin lives in the
   `fits_fully` threshold only).
-- **Verdict taxonomy** — `fits_fully` (need ≤ free × (1 − margin)),
-  `fits_cpu_offload` (weights ≤ free × 1.5 — the runtime offloads the
-  overflow to RAM; note: "partial GPU offload — expect reduced speed"),
-  `likely_too_large`, `cpu_only` (no GPU detected), `unknown` (header parse
-  failed — never a wrong verdict). `score = min(100, 100 × free/need)`.
+- **Verdict taxonomy** — `fits_fully` (need ≤ total VRAM × (1 − margin)),
+  `fits_cpu_offload` (need overflows total VRAM but fits via RAM offload —
+  weights ≤ RAM and need ≤ VRAM + RAM; note: "partial GPU offload — expect
+  reduced speed"), `likely_too_large`, `cpu_only` (no GPU detected),
+  `unknown` (header parse failed — never a wrong verdict).
+  `score = min(100, 100 × total_vram/need)`. Verdicts now factor RAM offload:
+  scored against total VRAM + `ram_total_mb` instead of free VRAM.
 - **Quant grouping** — `group_gguf_quants` collapses a repo's sibling files
   into one entry per quant token (`_QUANT_RE`, e.g. "Q4_K_M"/"Q8_0"/"Q1_0"),
   summing shard sizes (`_SHARD_RE` `-00001-of-00003.gguf`), ignoring

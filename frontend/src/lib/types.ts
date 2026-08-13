@@ -373,6 +373,7 @@ export interface GpuInfo {
 export interface HardwareInfo {
   gpu_available: boolean;
   gpus: GpuInfo[];
+  ram_total_mb: number | null;
 }
 
 export type CookbookVerdict =

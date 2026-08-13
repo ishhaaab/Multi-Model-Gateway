@@ -17,7 +17,7 @@ frontend as the primary client. The web frontend stays as-is for reference/deskt
 - **IA:** Chat ↔ Image are the two primary surfaces (bottom tabs). Agent + Deep Research are
   **modes of chat** (a toggle in the composer). Presets/templates/workflows are config screens.
   Model fit-checking is a utility under settings (the web app consolidated
-  it into the Models window — Local | Cloud tabs + bottom hardware strip).
+  it into the Models window — Local | Cloud tabs + hardware chip in the tab bar).
 - **Self-hosting/onboarding is not a concern.** The app talks to one known gateway URL entered
   once on first launch.
 - **Polish level: simple, clean, native.** Favor Expo built-in components, minimal custom
@@ -269,8 +269,9 @@ heuristic as the local catalog. New backend contract:
   **Local** tab of the single Models window (`/models`): a 2048–32768
   context-token selector, the recommendation banner, and the
   installed-model verdict table (Model / Quant / Needs / Verdict / Notes).
-  A compact "Detected hardware" strip is pinned at the bottom of the page
-  (fetched via `GET /v1/hardware`, persistent across tabs).
+  A compact "Detected hardware" chip lives in the top tab bar (fetched via
+  `GET /v1/hardware`, persistent across tabs) showing name · total VRAM ·
+  total RAM; no free-VRAM metric.
   `HfCookbookResponse`/`HfModelEntry` types and `hfApi.models` were added
   to `frontend/src/lib/types.ts` + `api-endpoints.ts`. The mobile port must
   mirror the tab UI and the nullable `need_gb`/`params_b` handling.
@@ -435,8 +436,8 @@ response shapes for the model detail screen:
 19. **Models (VRAM fit-check):** read-only — `hardwareApi.hardware()` +
     `GET /v1/cookbook` drive the Local fit list, `hfApi` drives the HF
     browser. The web app consolidated both into one Models window (Local |
-    Cloud tabs + bottom hardware strip); the mobile port should mirror that
-    instead of a separate screen.
+    Cloud tabs + hardware chip in the tab bar); the mobile port should mirror
+    that instead of a separate screen.
 20. **Agent tools:** `agentApi.tools()` list + `Switch` per tool bound to `setPermission`.
     First-party allowed by default; MCP deny by default.
 

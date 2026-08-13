@@ -1,7 +1,8 @@
-"""GPU/VRAM probe: pynvml first, `nvidia-smi` parsing as fallback,
-clean degradation to CPU-only when neither works (no NVIDIA driver, or the
-container has no GPU access — needs nvidia-container-toolkit + a `gpus`/
-deploy.resources grant in compose).
+"""GPU/VRAM + system-RAM probe: pynvml first, `nvidia-smi` parsing as
+fallback, clean degradation to CPU-only when neither works (no NVIDIA driver,
+or the container has no GPU access — needs nvidia-container-toolkit + a
+`gpus`/deploy.resources grant in compose). Total system RAM is read from
+`/proc/meminfo` (Linux only) so fit scoring can factor RAM offload.
 """
 import asyncio
 import logging
@@ -74,6 +75,23 @@ async def _probe_nvidia_smi() -> list[dict] | None:
     return gpus or None
 
 
+def _probe_ram() -> int | None:
+    """Total system RAM in MB from `/proc/meminfo` (Linux only).
+
+    Returns `None` on any failure or when the file is absent (non-Linux
+    hosts) — RAM is an offload hint, never a hard requirement.
+    """
+    try:
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    # e.g. "MemTotal:       65872964 kB"
+                    return int(line.split()[1]) // 1024
+    except Exception as e:  # noqa: BLE001 — missing file / odd format → None
+        logger.debug("RAM probe failed: %r", e)
+    return None
+
+
 async def probe_hardware() -> dict:
     gpus = _probe_pynvml()
     if gpus is None:
@@ -81,4 +99,5 @@ async def probe_hardware() -> dict:
     return {
         "gpu_available": bool(gpus),
         "gpus": gpus or [],
+        "ram_total_mb": _probe_ram(),
     }

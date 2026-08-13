@@ -144,10 +144,10 @@ class BuildHfCookbookTests(unittest.TestCase):
         fit_score._hf_cache.clear()
 
     def test_build_hf_cookbook_scores_entries(self):
-        """An 8B model on 6 GB free VRAM gets a real verdict and a need_gb."""
+        """An 8B model on 6 GB total VRAM gets a real verdict and a need_gb."""
         hw = {"gpu_available": True, "gpus": [
             {"index": 0, "name": "Test GPU", "vram_total_mb": 8192, "vram_free_mb": 6144},
-        ]}
+        ], "ram_total_mb": 32768}
         models = [{
             "id": "org/8b-model", "source": "hf", "params_b": 8.0,
             "size_bytes": None, "quant": None, "max_context": None,
@@ -171,7 +171,7 @@ class BuildHfCookbookTests(unittest.TestCase):
         """Entries are ranked with the same verdict order as the local cookbook."""
         hw = {"gpu_available": True, "gpus": [
             {"index": 0, "name": "Test GPU", "vram_total_mb": 8192, "vram_free_mb": 6144},
-        ]}
+        ], "ram_total_mb": 32768}
         models = [
             {"id": "org/big", "source": "hf", "params_b": 70.0, "size_bytes": None, "quant": None, "max_context": None},
             {"id": "org/small", "source": "hf", "params_b": 1.0, "size_bytes": None, "quant": None, "max_context": None},
@@ -196,11 +196,26 @@ class EstimateFitTests(unittest.TestCase):
     def test_estimate_fit_uses_default_bytes_per_param(self):
         """params_b with no quant is weighted at DEFAULT_BYTES_PER_PARAM."""
         model = {"params_b": 8, "quant": None, "size_bytes": None}
-        fit = fit_score.estimate_fit(model, None, 8192)
+        fit = fit_score.estimate_fit(model, None, None, 8192)
         self.assertEqual(fit["verdict"], "cpu_only")
         kv_gb = 8192 * 128e3 * (8 / 7) / 1e9
         expected_need = round((8 * fit_score.DEFAULT_BYTES_PER_PARAM + kv_gb) * 1.1, 1)
         self.assertEqual(fit["need_gb"], expected_need)
+
+    def test_ram_offload_when_weights_exceed_vram(self):
+        """~12 GB weights exceed 8 GB VRAM but fit in 32 GB RAM and the working
+        set fits in VRAM + RAM → partial_offload (NOT fits_fully, NOT wont_fit)."""
+        model = {"params_b": None, "quant": None, "size_bytes": 12_000_000_000}
+        fit = fit_score.estimate_fit(model, 8192, 32768, 8192)
+        self.assertEqual(fit["verdict"], "partial_offload")
+        # weights (12 GB) > VRAM (8 GB) → the "weights exceed" branch, not KV overflow
+        self.assertIn("weights exceed", fit["rationale"])
+
+    def test_wont_fit_when_weights_exceed_combined_vram_and_ram(self):
+        """~100 GB weights exceed 8 GB VRAM + 32 GB RAM combined → wont_fit."""
+        model = {"params_b": None, "quant": None, "size_bytes": 100_000_000_000}
+        fit = fit_score.estimate_fit(model, 8192, 32768, 8192)
+        self.assertEqual(fit["verdict"], "wont_fit")
 
 
 if __name__ == "__main__":
