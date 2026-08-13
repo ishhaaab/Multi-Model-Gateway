@@ -1,7 +1,9 @@
-"""VRAM-aware fit scoring for the local model catalog.
+"""VRAM-aware fit scoring for the local model catalog and Hugging Face.
 
-Model metadata comes from LM Studio (/api/v0/models: quant, max context).
-VRAM need is a documented heuristic, not a promise:
+Local metadata comes from LM Studio (/api/v0/models: quant, max context);
+Hugging Face metadata comes from the HF Hub /api/models (safetensors
+parameters/size, downloads, likes). VRAM need is a documented heuristic, not
+a promise:
 
   weights_gb ≈ size on disk          (or params_b × bytes/param for the quant)
   kv_gb      ≈ ctx_tokens × 128 KB × (params_b / 7)   # GQA-era ballpark
@@ -12,6 +14,7 @@ weights fit), wont_fit, cpu_only (no GPU detected).
 """
 import logging
 import re
+import time
 
 import httpx
 
@@ -26,7 +29,29 @@ QUANT_BYTES_PER_PARAM = {
 }
 DEFAULT_BYTES_PER_PARAM = 0.60  # assume Q4-ish when the quant is unknown
 
+# shared sort order for every cookbook: best-fit first, then score within a rank
+_VERDICT_RANK = {"fits_fully": 0, "partial_offload": 1, "cpu_only": 2, "wont_fit": 3, "unknown": 4}
+
 _PARAMS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*[bB]\b")
+
+# in-process TTL cache for Hugging Face catalog fetches (keyed by search+limit)
+_HF_CACHE_TTL = 600  # seconds
+_hf_cache: dict[tuple[str, int], tuple[float, list[dict]]] = {}
+
+
+def _cache_get(search: str, limit: int) -> list[dict] | None:
+    item = _hf_cache.get((search, limit))
+    if item is None:
+        return None
+    ts, models = item
+    if time.monotonic() - ts > _HF_CACHE_TTL:
+        _hf_cache.pop((search, limit), None)
+        return None
+    return models
+
+
+def _cache_set(search: str, limit: int, models: list[dict]) -> None:
+    _hf_cache[(search, limit)] = (time.monotonic(), models)
 
 
 def _parse_params_b(text: str) -> float | None:
@@ -132,8 +157,7 @@ async def build_cookbook(hardware: dict, context_tokens: int | None = None) -> d
         fit = estimate_fit(model, vram_free_mb, context_tokens)
         entries.append({**{k: v for k, v in model.items() if k != "size_bytes"}, **fit})
 
-    _verdict_rank = {"fits_fully": 0, "partial_offload": 1, "cpu_only": 2, "wont_fit": 3, "unknown": 4}
-    entries.sort(key=lambda e: (_verdict_rank.get(e["verdict"], 5), -e["score"]))
+    entries.sort(key=lambda e: (_VERDICT_RANK.get(e["verdict"], 5), -e["score"]))
 
     recommendation = None
     if entries and entries[0]["verdict"] in ("fits_fully", "partial_offload"):
@@ -144,4 +168,79 @@ async def build_cookbook(hardware: dict, context_tokens: int | None = None) -> d
         "context_tokens": context_tokens,
         "models": entries,
         "recommendation": recommendation,
+    }
+
+
+async def get_hf_models(search: str = "", limit: int = 10) -> list[dict]:
+    """Top Hugging Face models from the Hub API, sorted by downloads.
+
+    Returns a lightweight catalog entry per model (params from safetensors,
+    size in bytes, popularity stats). Never raises — on any failure it logs a
+    warning and returns [] so the cookbook page degrades to an empty table.
+    Results are cached in-process for _HF_CACHE_TTL seconds.
+    """
+    cached = _cache_get(search, limit)
+    if cached is not None:
+        return cached
+
+    params: dict = {"limit": min(limit, 50), "sort": "downloads"}
+    if search:
+        params["search"] = search
+
+    models: list[dict] = []
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get("https://huggingface.co/api/models", params=params)
+            response.raise_for_status()
+        for m in response.json():
+            weights = m.get("safetensors") or m.get("pytorch") or {}
+            params_b = weights.get("parameters") if isinstance(weights, dict) else None
+            if params_b is None:
+                params_b = _parse_params_b(m.get("id", ""))
+            models.append({
+                "id": m.get("id", ""),
+                "source": "hf",
+                "params_b": params_b,
+                "size_bytes": weights.get("total") if isinstance(weights, dict) else None,
+                "quant": None,
+                "max_context": None,
+                "downloads": m.get("downloads"),
+                "likes": m.get("likes"),
+                "lastModified": m.get("lastModified"),
+                "pipeline_tag": m.get("pipeline_tag"),
+                "library_name": m.get("library_name"),
+            })
+    except Exception as e:
+        logger.warning("Hugging Face catalog unavailable: %r", e)
+        return []
+
+    _cache_set(search, limit, models)
+    return models
+
+
+async def build_hf_cookbook(hardware: dict, context_tokens: int, search: str = "", limit: int = 10) -> dict:
+    """Fit-score the Hugging Face catalog against the probed hardware.
+
+    Shares estimate_fit and the verdict sort order with build_cookbook, so the
+    two tables rank apples-to-apples. Response mirrors the local cookbook but
+    with a `search` echo and `count` instead of a recommendation.
+    """
+    vram_free_mb = None
+    if hardware["gpu_available"]:
+        # single-GPU assumption: score against the card with the most free VRAM
+        vram_free_mb = max(g["vram_free_mb"] for g in hardware["gpus"])
+
+    entries = []
+    for model in await get_hf_models(search, limit):
+        fit = estimate_fit(model, vram_free_mb, context_tokens)
+        entries.append({**{k: v for k, v in model.items() if k != "size_bytes"}, **fit})
+
+    entries.sort(key=lambda e: (_VERDICT_RANK.get(e["verdict"], 5), -e["score"]))
+
+    return {
+        "hardware": hardware,
+        "context_tokens": context_tokens,
+        "search": search,
+        "models": entries,
+        "count": len(entries),
     }

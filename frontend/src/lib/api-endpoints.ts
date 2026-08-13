@@ -40,6 +40,7 @@ import type {
   TrainingEvent,
   HardwareInfo,
   CookbookResponse,
+  HfCookbookResponse,
 } from "./types";
 
 // ───────────── Auth ─────────────
@@ -285,5 +286,18 @@ export const hardwareApi = {
     apiClient.request<CookbookResponse>(
       "GET",
       `/v1/cookbook?context_tokens=${contextTokens}`
+    ),
+};
+
+// ───────────── Hugging Face cookbook ─────────────
+export const hfApi = {
+  models: (search: string, limit: number, contextTokens: number) =>
+    apiClient.request<HfCookbookResponse>(
+      "GET",
+      `/v1/hf/models?${new URLSearchParams({
+        search,
+        limit: String(limit),
+        context_tokens: String(contextTokens),
+      })}`
     ),
 };

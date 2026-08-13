@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-13 — Unified model-fit cookbook (Hugging Face tab)
+
+- Backend: new `GET /v1/hf/models` (auth) — searches the Hugging Face Hub API (downloads-sorted, in-process 10-min TTL cache) and fit-scores the results with the same `estimate_fit`/verdict ranking as the local cookbook (`build_hf_cookbook` shares `_VERDICT_RANK`).
+- Web SPA — Cookbook page: Local / Hugging Face source tabs; HF tab adds a search box + result-count dropdown and renders the same verdict table (params/downloads/likes sub-label, pipeline tag in Notes); recommendation banner stays local-only.
+- Tests: `backend/tests/test_fit_score.py` (7 cases: safetensors parsing, model-id fallback, fetch-failure → [], cache hit, cookbook scoring/sorting, DEFAULT_BYTES_PER_PARAM). Full suite 158 tests.
+
 ## 2026-08-11 — Memory files (M2)
 
 - Memory files M2: background curation pipeline (arq job, rule-based curation prompt, strict op parsing, versioned apply with retry-once, private chats excluded).

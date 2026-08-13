@@ -988,3 +988,44 @@ user says over time, not only from explicit `memory_*` tool edits.
 - `python -m py_compile` on all new/changed files.
 - `docker compose exec -T backend python -c "import app.worker; print([f.__name__ for f in app.worker.WorkerSettings.functions])"` — includes `run_memory_curation`.
 - `docker compose exec -T backend python -c "import app.main"` — boots; `/health` 200.
+
+## Unified model-fit cookbook (Hugging Face) — DONE
+
+The Cookbook page can now score **Hugging Face** models against the same
+VRAM heuristic as the local LM Studio catalog, so the two tables rank
+apples-to-apples.
+
+- **`services/fit_score.py`** — new `get_hf_models(search, limit)` queries
+  `https://huggingface.co/api/models` (`limit` capped at 50, `sort=downloads`,
+  10s timeout) and builds catalog entries from each model's
+  `safetensors`/`pytorch` block (`parameters` → `params_b`, `total` bytes →
+  `size_bytes`) plus `downloads`, `likes`, `lastModified`, `pipeline_tag`,
+  `library_name`. When no weights block exists, `params_b` falls back to
+  `_parse_params_b` on the model id. Any failure logs a warning and returns
+  `[]` — the endpoint never raises. Results are cached in-process for 600s
+  (`_hf_cache` keyed by `(search, limit)`, `_cache_get`/`_cache_set`).
+- **`build_hf_cookbook(hardware, context_tokens, search, limit)`** — same
+  VRAM logic as `build_cookbook` (max free VRAM across GPUs when
+  `gpu_available`), runs each entry through `estimate_fit`, and sorts with
+  the same verdict order. The rank dict is factored to a module constant
+  `_VERDICT_RANK` used by BOTH cookbook builders. Response:
+  `{hardware, context_tokens, search, models, count}` (no recommendation —
+  that stays local-only).
+- **`routers/hf.py`** — `GET /v1/hf/models?search=&limit=&context_tokens=`
+  (auth via `get_current_user`; `search` ≤200 chars, `limit` 1–50,
+  `context_tokens` 512–262144), mounted at `/v1` in `main.py`. Probes
+  hardware, then `build_hf_cookbook(hw, context_tokens or
+  settings.COOKBOOK_CONTEXT_TOKENS, search, limit)`.
+- **Frontend** — `cookbook.tsx` gains Local / Hugging Face tabs. The HF tab
+  has a search box (Enter/Search button) + result-count dropdown (10/25/50),
+  loads on submit / tab switch / context change, and reuses the shared
+  verdict table (HF sub-label `{params_b}B · HF · {downloads} downloads ·
+  {likes} likes`, quant column `—`, `pipeline_tag` appended to Notes).
+  `HfCookbookResponse`/`HfModelEntry` types + `hfApi.models` added to the
+  contract layer.
+- **Tests** — `backend/tests/test_fit_score.py` (stdlib unittest, skip-import
+  pattern; 7 cases): safetensors → `params_b`/`size_bytes`, model-id fallback
+  (`qwen2.5-7b-instruct` → 7.0), fetch failure → `[]`, cache hit skips the
+  second fetch, `build_hf_cookbook` scores/sorts entries, and
+  `estimate_fit` with no quant uses `DEFAULT_BYTES_PER_PARAM`. Full suite:
+  158 tests pass (was 151).

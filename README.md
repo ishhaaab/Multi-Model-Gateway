@@ -154,6 +154,14 @@ account, close the door: set `REGISTRATION_ENABLED=false` in `.env` and restart 
 | POST | `/v1/images/generate` | Generate image via ComfyUI | Yes |
 | GET | `/v1/images/status/{prompt_id}` | Poll generation status | Yes |
 
+### Cookbook / Hardware
+
+| Method | Path | Description | Auth |
+|---|---|---|---|
+| GET | `/v1/hardware` | GPU/VRAM probe (pynvml or nvidia-smi) | Yes |
+| GET | `/v1/cookbook` | Fit-score the local LM Studio catalog against your hardware | Yes |
+| GET | `/v1/hf/models` | Search Hugging Face models (`search`, `limit` 1–50) fit-scored against your hardware | Yes |
+
 ### Health
 
 | Method | Path | Description | Auth |

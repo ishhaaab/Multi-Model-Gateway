@@ -247,6 +247,32 @@ Backend audit-INFO pass with two client-visible notes:
   plus the `api-client.ts` refresh-retry path send it. Legacy clients that omit the field
   keep working (unbound tokens are accepted from any device). No other contract changes.
 
+### Cookbook UI tabs + HF model endpoint (unified fit scoring)
+
+The Cookbook page now scores Hugging Face models against the same VRAM
+heuristic as the local catalog. New backend contract:
+
+- **`GET /v1/hf/models?search=&limit=&context_tokens=`** (auth required) —
+  plain JSON. Query params: `search` (≤200 chars, optional), `limit` (1–50,
+  default 10), `context_tokens` (512–262144, optional; defaults to the
+  backend's `COOKBOOK_CONTEXT_TOKENS`).
+- **Response shape `HfCookbookResponse`:** `{hardware, context_tokens,
+  search, models, count}` — same `hardware`/`context_tokens` as
+  `/v1/cookbook` but **no `recommendation`** and a `count` instead of it.
+- **`HfModelEntry`:** mirrors `CookbookModel` (`id`, `source: "hf"`,
+  `verdict`, `score`, `need_gb` (nullable), `rationale`) plus nullable HF
+  fields `params_b`, `quant` (always `null`), `downloads`, `likes`,
+  `lastModified`, `pipeline_tag`, `library_name`.
+- **Web SPA status: DONE.** `frontend/src/pages/cookbook.tsx` restructured
+  with Local / Hugging Face tabs: the HF tab has a search box (Enter/Search
+  button) + a 10/25/50 results dropdown, loads on submit / tab switch /
+  context change, and renders the same verdict table (HF sub-label
+  `{params_b}B · HF · {downloads} downloads · {likes} likes`, quant column
+  `—`, `pipeline_tag` appended to Notes). The recommendation banner stays
+  local-only. `HfCookbookResponse`/`HfModelEntry` types and `hfApi.models`
+  were added to `frontend/src/lib/types.ts` + `api-endpoints.ts`. The mobile
+  port must mirror the tab UI and the nullable `need_gb`/`params_b` handling.
+
 ## Phases
 
 ### Phase 1 — Scaffold + contract layer + auth

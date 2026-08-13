@@ -399,3 +399,25 @@ export interface CookbookResponse {
   recommendation: string;
   models: CookbookModel[];
 }
+
+// GET /v1/hf/models — same fit scoring, catalog sourced from the Hugging Face Hub.
+export interface HfModelEntry
+  extends Omit<CookbookModel, "params_b" | "quant" | "need_gb" | "source"> {
+  source: "hf";
+  params_b: number | null;
+  quant: string | null;
+  need_gb: number | null;
+  downloads: number | null;
+  likes: number | null;
+  lastModified: string | null;
+  pipeline_tag: string | null;
+  library_name: string | null;
+}
+
+export interface HfCookbookResponse {
+  hardware: HardwareInfo;
+  context_tokens: number;
+  search: string;
+  models: HfModelEntry[];
+  count: number;
+}
