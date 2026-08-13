@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-13 — HF model browser follow-up (review fixes)
+
+- Backend: GGUF header walker (`_read_gguf_value`) now skips ARRAY KV payloads in full — fixed-size scalar arrays jump `count × elem_size`, string arrays walk each element — instead of truncating at 4096 elements, which drifted every later key offset on large arrays. Array values are never materialized (the fit fields are all scalars/strings); a payload that overruns the buffer fails the parse instead of silently truncating.
+- Tests: `backend/tests/test_hf_detail.py` +3 cases (large scalar array >4096 followed by scalar keys, uneven string array, truncated array payload → None). Full suite 179 tests (was 176).
+
 ## 2026-08-13 — HF model browser + GGUF-accurate fit (F1)
 
 - Backend: new `GET /v1/hf/models/{repo_id}` (auth) — HF repo stats (downloads/likes/params/description), capability + format pills, and per-quant VRAM fits computed from each GGUF's own header (real n_layer/n_embd/n_head[_kv], exact KV formula, 10% safety margin; verdicts fits_fully / fits_cpu_offload / likely_too_large / cpu_only / unknown). Header reads are 4MB Range requests cached in-process (600s), capped at 12 quants.

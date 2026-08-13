@@ -1082,11 +1082,22 @@ and becomes exact (real `n_layer`/`n_embd`/`n_head[_kv]`).
   Range requests and shows fits. Installing a quant from the UI is out of
   scope for F1.
 - **Tests** — `backend/tests/test_hf_detail.py` (stdlib unittest, skip-import
-  pattern; 18 cases): quant grouping (singles/shards/non-GGUF/sort), quant
+  pattern; 21 cases): quant grouping (singles/shards/non-GGUF/sort), quant
   regex extraction, `estimate_gguf_fit` arithmetic (4.7 GB + GQA 32/8 @ 8k on
   6 GB → `fits_cpu_offload`, 29 GB → `likely_too_large`, meta-None →
   `unknown`, no-GPU → `cpu_only`), the header walker (real layout + bad magic
-  + truncation + missing `n_kv_head` default), `read_gguf_metadata` (Range
+  + truncation + missing `n_kv_head` default + array-skip: a >4096-element
+  scalar array and an uneven string array before the required scalar keys,
+  plus a truncated array payload → None), `read_gguf_metadata` (Range
   header sent, failures cached), and `build_hf_model_detail` end-to-end
   (mocked Hub API + mocked header reads → quants with per-quant fit,
-  capabilities, formats). Full suite: 176 tests pass (was 158).
+  capabilities, formats). Full suite: 179 tests pass (was 176).
+- **Review fix (array offset drift)** — `_read_gguf_value` previously walked
+  only the first `min(count, 4096)` array elements and left the offset short
+  of the rest of the payload, so any KV key following a large array was read
+  from the wrong bytes (a real repo with a >4096-element array misparsed
+  `context_length`). The walker now skips the whole payload: fixed-size
+  scalar arrays jump `count × elem_size` in one bounds-checked step, string
+  arrays walk each element (`u64` length prefix + bytes), and a payload that
+  overruns the buffer fails the parse (None) instead of silently truncating.
+  Array values are never stored — the fit fields are all scalars/strings.

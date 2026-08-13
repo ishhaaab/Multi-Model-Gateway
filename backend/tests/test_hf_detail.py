@@ -231,6 +231,141 @@ class GgufHeaderParseTests(unittest.TestCase):
     def test_truncated_body_returns_none(self):
         self.assertIsNone(fit_score._parse_gguf_header(_gguf_bytes()[:30]))
 
+    def test_large_scalar_array_skipped_without_offset_drift(self):
+        """An ARRAY KV with >4096 elements must be skipped in FULL — the old
+        walker truncated the element loop at 4096 and then misread every key
+        that followed. The big array payload sits BEFORE the scalar key we
+        need, so a correct walker must land exactly on it."""
+        data = bytearray()
+
+        def push_string(s: str):
+            raw = s.encode("utf-8")
+            data.extend(struct.pack("<Q", len(raw)))
+            data.extend(raw)
+
+        def push_u32(v: int):
+            data.extend(struct.pack("<I", v))
+
+        def push_u64(v: int):
+            data.extend(struct.pack("<Q", v))
+
+        data.extend(b"GGUF")
+        push_u32(3)          # version
+        push_u64(0)          # tensor_count (unused)
+        push_u64(5)          # kv_count
+
+        # KV 1: general.architecture (STRING)
+        push_string("general.architecture")
+        push_u32(8)          # STRING
+        push_string("qwen2")
+
+        # KV 2: a 5000-element UINT32 array (5000 * 4 = 20000 payload bytes)
+        push_string("some.large_array")
+        push_u32(9)          # ARRAY
+        push_u32(4)          # element type UINT32
+        push_u64(5000)       # count > 4096, the old truncation cap
+        data.extend(struct.pack("<I", 7) * 5000)
+
+        # KVs 3-5: the scalar fields the parser needs — must all still parse
+        # correctly after the skipped array
+        push_string("llama.block_count")
+        push_u32(4)          # UINT32
+        push_u32(28)
+        push_string("llama.embedding_length")
+        push_u32(4)
+        push_u32(3584)
+        push_string("llama.attention.head_count")
+        push_u32(4)
+        push_u32(28)
+
+        meta = fit_score._parse_gguf_header(bytes(data))
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta["architecture"], "qwen2")
+        self.assertEqual(meta["n_layer"], 28)
+        self.assertEqual(meta["n_embd"], 3584)
+        self.assertEqual(meta["n_head"], 28)
+
+    def test_string_array_skipped_without_offset_drift(self):
+        """STRING-array elements are variable-length (u64 prefix + bytes), so
+        the skip must walk each element instead of jumping a fixed size."""
+        data = bytearray()
+
+        def push_string(s: str):
+            raw = s.encode("utf-8")
+            data.extend(struct.pack("<Q", len(raw)))
+            data.extend(raw)
+
+        def push_u32(v: int):
+            data.extend(struct.pack("<I", v))
+
+        def push_u64(v: int):
+            data.extend(struct.pack("<Q", v))
+
+        data.extend(b"GGUF")
+        push_u32(3)
+        push_u64(0)
+        push_u64(5)
+
+        push_string("general.architecture")
+        push_u32(8)          # STRING
+        push_string("llama")
+
+        # KV 2: a 3-element STRING array with uneven lengths
+        push_string("tokenizer.ggml.tokens")
+        push_u32(9)          # ARRAY
+        push_u32(8)          # element type STRING
+        push_u64(3)
+        for token in ("a", "bbbb", "cc"):
+            push_string(token)
+
+        # KVs 3-5: the scalar fields the parser needs — must all still parse
+        # correctly after the skipped string array
+        push_string("llama.block_count")
+        push_u32(4)          # UINT32
+        push_u32(28)
+        push_string("llama.embedding_length")
+        push_u32(4)
+        push_u32(3584)
+        push_string("llama.attention.head_count")
+        push_u32(4)
+        push_u32(28)
+
+        meta = fit_score._parse_gguf_header(bytes(data))
+        self.assertIsNotNone(meta)
+        self.assertEqual(meta["architecture"], "llama")
+        self.assertEqual(meta["n_layer"], 28)
+        self.assertEqual(meta["n_embd"], 3584)
+        self.assertEqual(meta["n_head"], 28)
+
+    def test_truncated_array_payload_returns_none(self):
+        """The array skip must fail the parse (never silently truncate) when
+        the declared payload runs past the buffer."""
+        data = bytearray()
+
+        def push_string(s: str):
+            raw = s.encode("utf-8")
+            data.extend(struct.pack("<Q", len(raw)))
+            data.extend(raw)
+
+        def push_u32(v: int):
+            data.extend(struct.pack("<I", v))
+
+        def push_u64(v: int):
+            data.extend(struct.pack("<Q", v))
+
+        data.extend(b"GGUF")
+        push_u32(3)
+        push_u64(0)
+        push_u64(1)
+
+        push_string("some.large_array")
+        push_u32(9)          # ARRAY
+        push_u32(4)          # element type UINT32
+        push_u64(5000)       # count claims 20000 bytes, buffer has none
+        # no payload follows
+
+        self.assertIsNone(fit_score._parse_gguf_header(bytes(data)))
+
     def test_missing_kv_head_defaults_to_head(self):
         data = bytearray()
 

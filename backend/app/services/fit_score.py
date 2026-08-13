@@ -100,6 +100,10 @@ _GGUF_VALUE_FMT = {
     gguf.GGUFValueType.FLOAT64: ("<d", 8),
 }
 
+# sentinel for ARRAY KV values: the walker validates the payload bounds and
+# skips past it but never stores it — the fit fields are all scalars/strings
+_ARRAY_SKIPPED = object()
+
 # known architecture substrings used to infer `arch` when the model has no
 # safetensors block to name it
 _KNOWN_ARCHS = (
@@ -376,7 +380,13 @@ def _read_gguf_string(data: bytes, off: int) -> tuple[str | None, int]:
 
 
 def _read_gguf_value(data: bytes, off: int, vtype: gguf.GGUFValueType) -> tuple[object | None, int]:
-    """One GGUF KV value starting at `off`; returns (value, next_offset)."""
+    """One GGUF KV value starting at `off`; returns (value, next_offset).
+
+    ARRAY values are bounds-checked and skipped, never materialized: the fit
+    formula only reads scalars/strings, so building the payload would be
+    wasted work — but the walker MUST advance past the WHOLE array or every
+    later key offset drifts.
+    """
     if vtype == gguf.GGUFValueType.STRING:
         return _read_gguf_string(data, off)
     if vtype == gguf.GGUFValueType.ARRAY:
@@ -387,13 +397,25 @@ def _read_gguf_value(data: bytes, off: int, vtype: gguf.GGUFValueType) -> tuple[
         elem_type = gguf.GGUFValueType(struct.unpack_from("<I", data, off)[0])
         count = struct.unpack_from("<Q", data, off + 4)[0]
         off += 12
-        items = []
-        for _ in range(min(count, 4096)):
-            item, off = _read_gguf_value(data, off, elem_type)
-            if item is None:
+        if elem_type == gguf.GGUFValueType.STRING:
+            # variable-length elements: each carries a u64 length prefix
+            for _ in range(count):
+                if off + 8 > len(data):
+                    return None, off
+                n = struct.unpack_from("<Q", data, off)[0]
+                off += 8
+                if n > len(data) - off:
+                    return None, off
+                off += n
+        else:
+            # fixed-size scalars: skip count × elem_size in one jump (a nested
+            # array or unknown type fails the parse; count may be huge, so the
+            # bounds check happens before the offset moves)
+            elem = _GGUF_VALUE_FMT.get(elem_type)
+            if elem is None or count > (len(data) - off) // elem[1]:
                 return None, off
-            items.append(item)
-        return items, off
+            off += count * elem[1]
+        return _ARRAY_SKIPPED, off
     fmt = _GGUF_VALUE_FMT.get(vtype)
     if fmt is None or off + fmt[1] > len(data):
         return None, off
@@ -436,7 +458,8 @@ def _parse_gguf_header(data: bytes) -> dict | None:
             value, off = _read_gguf_value(data, off, vtype)
             if value is None:
                 return None
-            fields[key] = value
+            if value is not _ARRAY_SKIPPED:
+                fields[key] = value
     except (struct.error, ValueError):
         return None
 
