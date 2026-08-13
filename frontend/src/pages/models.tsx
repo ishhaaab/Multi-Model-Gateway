@@ -225,31 +225,11 @@ export default function ModelsPage() {
         </Button>
       </header>
 
-      {/* Tab control — Local | Cloud, with the hardware chip on the right */}
+      {/* Tab control — hardware chip on the left, Local | Cloud tabs on the right */}
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-6 py-3">
-        {(
-          [
-            { id: "local", label: "Local" },
-            { id: "cloud", label: "Cloud" },
-          ] as const
-        ).map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={cn(
-              "rounded-lg border px-3 py-1.5 text-[0.8125rem] transition-colors",
-              tab === t.id
-                ? "border-accent-primary bg-accent-primary text-white"
-                : "border-border bg-bg-tertiary text-text-secondary hover:text-text-primary"
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-
         {/* Detected hardware chip — name · total VRAM · total RAM (no free-VRAM
             metric). Shared across both tabs. */}
-        <div className="ml-auto flex items-center">
+        <div className="flex items-center">
           {hardwareLoading && !hardware ? (
             <Skeleton className="h-5 w-40" />
           ) : !hardware?.gpu_available || !primaryGpu ? (
@@ -272,6 +252,28 @@ export default function ModelsPage() {
               </span>
             </div>
           )}
+        </div>
+
+        <div className="ml-auto flex items-center gap-1.5">
+          {(
+            [
+              { id: "local", label: "Local" },
+              { id: "cloud", label: "Cloud" },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "rounded-lg border px-3 py-1.5 text-[0.8125rem] transition-colors",
+                tab === t.id
+                  ? "border-accent-primary bg-accent-primary text-white"
+                  : "border-border bg-bg-tertiary text-text-secondary hover:text-text-primary"
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
       </div>
 

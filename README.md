@@ -158,7 +158,7 @@ account, close the door: set `REGISTRATION_ENABLED=false` in `.env` and restart 
 
 | Method | Path | Description | Auth |
 |---|---|---|---|
-| GET | `/v1/hardware` | GPU/VRAM probe (pynvml or nvidia-smi); also returns `ram_total_mb` (total system RAM) | Yes |
+| GET | `/v1/hardware` | GPU/VRAM probe (pynvml or nvidia-smi); also returns `ram_total_mb` (total system RAM — override with `HOST_RAM_MB` under Docker Desktop/WSL2) | Yes |
 | GET | `/v1/cookbook` | Fit-score the local LM Studio catalog against total VRAM + RAM offload | Yes |
 | GET | `/v1/hf/models` | Search Hugging Face models (`search`, `limit` 1–50) fit-scored against total VRAM + RAM offload | Yes |
 | GET | `/v1/hf/models/{repo_id}` | HF model detail + per-quant GGUF-accurate fit (`context_tokens` 512–262144) | Yes |
@@ -324,6 +324,7 @@ Auto HTTPS is disabled. The frontend should call `/api/v1/*` and Caddy will forw
 | `TRUSTED_PROXIES` | No | Comma-separated CIDRs of reverse proxies whose `X-Forwarded-For` header the rate limiter trusts (default `172.16.0.0/12` — the Docker bridge Caddy sits on). Set to empty to ignore `X-Forwarded-For` entirely |
 | `REGISTRATION_ENABLED` | No | Set `false` to disable open signups — `POST /auth/register` returns 403 "registration disabled" (default `true`) |
 | `ALLOW_PRIVATE_PROVIDER_URLS` | No | Provider `base_url`s may point at private/loopback hosts (e.g. local LM Studio); set `false` to enforce public-only URLs — breaks local providers, use only on locked-down deployments (default `true`) |
+| `HOST_RAM_MB` | No | Total host RAM in MB used for the RAM-offload fit verdict; `0` = auto-detect from `/proc/meminfo`. Set explicitly (e.g. `16384`) when running under Docker Desktop/WSL2 — its `/proc/meminfo` reports the VM's memory allocation, not the host's physical RAM |
 | `MCP_SERVERS` | No | JSON list of MCP servers (stdio/SSE) the agent can call. **Operator-configured only — it can spawn arbitrary commands; never let user input reach this setting** |
 | `MEMORY_FILE_CAP_BYTES` | No | Per-file cap for the user memory file store; writes at/over the cap are rejected, never truncated (default `32768`) |
 | `MEMORY_TIER1_5_PATHS` | No | Comma-separated memory file paths always injected in full into chat/agent context (default `/profile.md,/preferences.md`) |

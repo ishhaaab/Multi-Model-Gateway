@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-13 — HOST_RAM_MB override + hardware/tab swap
+
+- RAM-offload fit scoring now honors `HOST_RAM_MB` (the Docker Desktop WSL2 VM under-reports host RAM, so `/v1/hardware`'s `ram_total_mb` can be overridden explicitly). Frontend: the Models window hardware chip moved to the left and the Local | Cloud tabs to the right.
+
 ## 2026-08-13 — Fit scoring: total VRAM + RAM offload; hardware chip
 
 - Backend: fit verdicts (local cookbook + HF browser) now score against TOTAL VRAM and factor RAM offload instead of free VRAM; `/v1/hardware` adds `ram_total_mb`. Frontend: the Models window hardware chip moved to the top tab bar showing "name · total VRAM · total RAM" (no free-VRAM metric / usage bar).

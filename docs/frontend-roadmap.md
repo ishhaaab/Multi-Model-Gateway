@@ -269,9 +269,10 @@ heuristic as the local catalog. New backend contract:
   **Local** tab of the single Models window (`/models`): a 2048–32768
   context-token selector, the recommendation banner, and the
   installed-model verdict table (Model / Quant / Needs / Verdict / Notes).
-  A compact "Detected hardware" chip lives in the top tab bar (fetched via
-  `GET /v1/hardware`, persistent across tabs) showing name · total VRAM ·
-  total RAM; no free-VRAM metric.
+     A compact "Detected hardware" chip lives in the top tab bar (fetched via
+     `GET /v1/hardware`, persistent across tabs) showing name · total VRAM ·
+     total RAM; no free-VRAM metric. The chip sits on the LEFT of the tab bar
+     and the Local | Cloud tab buttons are right-aligned (`ml-auto`).
   `HfCookbookResponse`/`HfModelEntry` types and `hfApi.models` were added
   to `frontend/src/lib/types.ts` + `api-endpoints.ts`. The mobile port must
   mirror the tab UI and the nullable `need_gb`/`params_b` handling.
