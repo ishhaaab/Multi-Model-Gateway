@@ -1,25 +1,16 @@
 import type { ReactNode } from "react";
 import { Download, X } from "lucide-react";
 import type { HfFitVerdict, HfQuantOption } from "@/lib/types";
+import { HF_VERDICT } from "@/lib/fit-verdict";
 import { cn, truncate } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 
-// Fit-verdict badge map (mirrors the cookbook's verdict colors: green fits,
-// amber offload, red too large, muted unknown/cpu-only).
+// Shared label/color map lives in lib/fit-verdict.ts (also used by the Local
+// tab); the HF browser adds a ✕ glyph to "Likely too large" on top of it.
 const FIT_VERDICT: Record<HfFitVerdict, { label: string; cls: string; icon?: ReactNode }> = {
-  fits_fully: { label: "Fits fully", cls: "bg-success/15 text-success" },
-  fits_cpu_offload: {
-    label: "Fits with CPU offload",
-    cls: "bg-accent-secondary/15 text-accent-secondary",
-  },
-  likely_too_large: {
-    label: "Likely too large",
-    cls: "bg-danger/15 text-danger",
-    icon: <X size={12} />,
-  },
-  cpu_only: { label: "CPU only", cls: "bg-bg-elevated/60 text-text-muted" },
-  unknown: { label: "Unknown", cls: "bg-bg-elevated/60 text-text-muted" },
+  ...HF_VERDICT,
+  likely_too_large: { ...HF_VERDICT.likely_too_large, icon: <X size={12} /> },
 };
 
 /** Base GGUF filename without extension / shard numbering, truncated. */

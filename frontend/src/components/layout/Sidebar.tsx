@@ -7,7 +7,6 @@ import {
   ImageIcon,
   Bot,
   Telescope,
-  Cpu,
   GraduationCap,
   Settings,
   LogOut,
@@ -33,11 +32,10 @@ const MODES = [
   { to: "/images", label: "Image", icon: ImageIcon },
 ];
 
-// Secondary destinations — agent + research + cookbook + providers.
+// Secondary destinations — agent + research + models + providers.
 const TOOLS = [
   { to: "/agent", label: "Agent", icon: Bot },
   { to: "/research", label: "Research", icon: Telescope },
-  { to: "/cookbook", label: "Cookbook", icon: Cpu },
   { to: "/models", label: "Models", icon: Library },
   { to: "/trainings", label: "Training", icon: GraduationCap },
   { to: "/providers", label: "Providers", icon: KeyRound },
@@ -161,7 +159,7 @@ export function Sidebar() {
           ))}
         </nav>
 
-        {/* secondary nav — Agent / Research / Cookbook */}
+        {/* secondary nav — Agent / Research / Models */}
         <nav className="flex flex-col items-center gap-1 border-t border-border px-2 py-2">
           {TOOLS.map(({ to, label, icon: Icon }) => (
             <NavLink
@@ -278,7 +276,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Secondary nav — Agent / Research / Cookbook */}
+      {/* Secondary nav — Agent / Research / Models */}
       <nav className="flex flex-col gap-0.5 px-3 pb-3">
         {TOOLS.map(({ to, label, icon: Icon }) => (
           <NavLink

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-13 — Unified "Models" window (Local | Cloud)
+
+- Frontend: unified single "Models" window — Local | Cloud tabs, Cloud = two-pane HF browser (per-quant GGUF fit), Local = installed-model fit list, compact hardware box at bottom. Removed the separate Cookbook page.
+
 ## 2026-08-13 — HF model browser UI (two-pane)
 
 - Web SPA — new `/models` two-pane HF model browser: catalog list (search + 10/25/50 dropdown) fed by `GET /v1/hf/models`, detail pane fed by `GET /v1/hf/models/{repo_id}` (stats, description, PARAMS/ARCH/DOMAIN/FORMAT metadata, capability pills, per-quant GGUF fit verdicts + rationale with a shared context-token selector). Download/install pipeline deferred — the Download affordance renders disabled with a "coming soon" hint. Cookbook HF rows navigate into the browser (`/models?repo=<id>`). Types `HfFitVerdict`/`HfQuantOption`/`HfModelDetail`/`HfModelSummary` + `hfApi.detail` added; route + sidebar "Models" nav item.

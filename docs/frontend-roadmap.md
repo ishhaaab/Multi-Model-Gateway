@@ -13,10 +13,11 @@ frontend as the primary client. The web frontend stays as-is for reference/deskt
   contract layer (types, SSE parsing, Zustand stores) from the web app.
 - **Platform: Android-first.** iOS can follow from the same codebase.
 - **Scope: full feature parity.** Chat + agent + research (as in-chat modes) + image generation
-  + presets/templates/workflows + cookbook + settings + auth.
+  + presets/templates/workflows + models + settings + auth.
 - **IA:** Chat ↔ Image are the two primary surfaces (bottom tabs). Agent + Deep Research are
   **modes of chat** (a toggle in the composer). Presets/templates/workflows are config screens.
-  Cookbook is a utility under settings.
+  Model fit-checking is a utility under settings (the web app consolidated
+  it into the Models window — Local | Cloud tabs + bottom hardware strip).
 - **Self-hosting/onboarding is not a concern.** The app talks to one known gateway URL entered
   once on first launch.
 - **Polish level: simple, clean, native.** Favor Expo built-in components, minimal custom
@@ -247,9 +248,9 @@ Backend audit-INFO pass with two client-visible notes:
   plus the `api-client.ts` refresh-retry path send it. Legacy clients that omit the field
   keep working (unbound tokens are accepted from any device). No other contract changes.
 
-### Cookbook UI tabs + HF model endpoint (unified fit scoring)
+### HF model endpoint + unified fit scoring
 
-The Cookbook page now scores Hugging Face models against the same VRAM
+The Models window scores Hugging Face models against the same VRAM
 heuristic as the local catalog. New backend contract:
 
 - **`GET /v1/hf/models?search=&limit=&context_tokens=`** (auth required) —
@@ -263,15 +264,16 @@ heuristic as the local catalog. New backend contract:
   `verdict`, `score`, `need_gb` (nullable), `rationale`) plus nullable HF
   fields `params_b`, `quant` (always `null`), `downloads`, `likes`,
   `lastModified`, `pipeline_tag`, `library_name`.
-- **Web SPA status: DONE.** `frontend/src/pages/cookbook.tsx` restructured
-  with Local / Hugging Face tabs: the HF tab has a search box (Enter/Search
-  button) + a 10/25/50 results dropdown, loads on submit / tab switch /
-  context change, and renders the same verdict table (HF sub-label
-  `{params_b}B · HF · {downloads} downloads · {likes} likes`, quant column
-  `—`, `pipeline_tag` appended to Notes). The recommendation banner stays
-  local-only. `HfCookbookResponse`/`HfModelEntry` types and `hfApi.models`
-  were added to `frontend/src/lib/types.ts` + `api-endpoints.ts`. The mobile
-  port must mirror the tab UI and the nullable `need_gb`/`params_b` handling.
+- **Web SPA status: DONE — folded into the unified Models window.** The
+  former separate page was removed; its functionality lives in the
+  **Local** tab of the single Models window (`/models`): a 2048–32768
+  context-token selector, the recommendation banner, and the
+  installed-model verdict table (Model / Quant / Needs / Verdict / Notes).
+  A compact "Detected hardware" strip is pinned at the bottom of the page
+  (fetched via `GET /v1/hardware`, persistent across tabs).
+  `HfCookbookResponse`/`HfModelEntry` types and `hfApi.models` were added
+  to `frontend/src/lib/types.ts` + `api-endpoints.ts`. The mobile port must
+  mirror the tab UI and the nullable `need_gb`/`params_b` handling.
 
 ### HF model detail endpoint (per-quant GGUF fit) — backend DONE, SPA DONE
 
@@ -315,8 +317,10 @@ response shapes for the model detail screen:
     cpu_only + unknown=muted) + rationale. The **Download button is rendered
     disabled with a "coming soon" hint — the install/download pipeline is
     deferred** (no backend endpoint exists yet).
-  - **Cookbook wiring:** the HF tab's verdict-table rows are now clickable and
-    navigate to `/models?repo=<id>`.
+  - **Models window wiring:** the former separate page is gone — the two-pane browser
+    is the Models window's **Cloud** tab and the **Local** tab carries over
+    the installed-model fit list. Row selection stays URL-driven
+    (`?repo=<id>`).
   - New types (`HfFitVerdict`, `HfQuantOption`, `HfModelDetail`,
     `HfModelSummary`) in `frontend/src/lib/types.ts`; `hfApi.detail(repo_id,
     context_tokens)` in `api-endpoints.ts`; route + sidebar "Models" nav item
@@ -371,7 +375,7 @@ response shapes for the model detail screen:
      (chat)/[id].tsx        → chat thread
      (images)/index.tsx     → image generation + history
      (settings)/index.tsx   → settings menu
-     (settings)/presets.tsx, templates.tsx, workflows.tsx, cookbook.tsx, agent-tools.tsx, gateway.tsx
+      (settings)/presets.tsx, templates.tsx, workflows.tsx, models.tsx, agent-tools.tsx, gateway.tsx
    ```
 
 ### Phase 2 — Chat (with agent + research as modes)
@@ -424,12 +428,15 @@ response shapes for the model detail screen:
 ### Phase 4 — Settings + config screens
 
 17. **Settings menu** → Account (email + logout), Gateway (change URL), Presets, Templates,
-    Workflows, Cookbook, Agent Tools.
+    Workflows, Models, Agent Tools.
 18. **Presets/Templates/Workflows:** CRUD screens adapting the web `PresetForm`/`TemplateForm`/
     `WorkflowForm` to RN inputs. Workflows use a full-screen monospace `TextInput` for the
     ComfyUI JSON graph (no graph editor).
-19. **Cookbook:** read-only — `hardwareApi.hardware()` + `hardwareApi.cookbook()`, GPU info +
-    ranked model fit scores.
+19. **Models (VRAM fit-check):** read-only — `hardwareApi.hardware()` +
+    `GET /v1/cookbook` drive the Local fit list, `hfApi` drives the HF
+    browser. The web app consolidated both into one Models window (Local |
+    Cloud tabs + bottom hardware strip); the mobile port should mirror that
+    instead of a separate screen.
 20. **Agent tools:** `agentApi.tools()` list + `Switch` per tool bound to `setPermission`.
     First-party allowed by default; MCP deny by default.
 
@@ -453,7 +460,7 @@ response shapes for the model detail screen:
   mid-stream. Open a conversation → continues the thread.
 - **Phase 3:** enter prompt → select ratio → generate → image appears → fullscreen → save to
   gallery. Rewrite toggle on → prompt rewritten. History list populates.
-- **Phase 4:** preset/template/workflow CRUD persists. Cookbook shows GPU + fit scores. Tool
+- **Phase 4:** preset/template/workflow CRUD persists. Models shows GPU + fit scores. Tool
   permission toggle respected by the next agent run.
 - **Phase 5:** safe areas on all screens. Haptics on send. `eas build` → APK → sideload on a
   phone → enter tailnet gateway URL → full app works over Tailscale.
