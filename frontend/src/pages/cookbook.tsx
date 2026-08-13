@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Cpu, RotateCw, Search, Sparkles } from "lucide-react";
 import { hardwareApi, hfApi } from "@/lib/api-endpoints";
 import type { CookbookModel, CookbookResponse, CookbookVerdict, HfCookbookResponse, HfModelEntry } from "@/lib/types";
@@ -28,10 +29,12 @@ interface ModelTableProps {
   sublabel: (m: CookbookModel | HfModelEntry) => string;
   quantLabel: (m: CookbookModel | HfModelEntry) => string;
   notes: (m: CookbookModel | HfModelEntry) => string;
+  /** When provided, rows become clickable (HF tab → model browser). */
+  onRowClick?: (m: CookbookModel | HfModelEntry) => void;
 }
 
 /** Shared table so both tabs compare apples-to-apples (same columns). */
-function ModelTable({ models, sublabel, quantLabel, notes }: ModelTableProps) {
+function ModelTable({ models, sublabel, quantLabel, notes, onRowClick }: ModelTableProps) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border">
       <table className="w-full border-collapse text-sm">
@@ -48,7 +51,14 @@ function ModelTable({ models, sublabel, quantLabel, notes }: ModelTableProps) {
           {models.map((m) => {
             const v = VERDICT[m.verdict] ?? VERDICT.unknown;
             return (
-              <tr key={m.id} className="border-t border-border align-top">
+              <tr
+                key={m.id}
+                onClick={onRowClick ? () => onRowClick(m) : undefined}
+                className={cn(
+                  "border-t border-border align-top",
+                  onRowClick && "cursor-pointer transition-colors hover:bg-bg-tertiary/40"
+                )}
+              >
                 <td className="px-3 py-2.5">
                   <span className="block font-mono text-[0.8125rem] text-text-primary">{m.id}</span>
                   <span className="text-[0.7rem] text-text-muted">{sublabel(m)}</span>
@@ -75,6 +85,7 @@ function ModelTable({ models, sublabel, quantLabel, notes }: ModelTableProps) {
 }
 
 export default function CookbookPage() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("local");
   const [contextTokens, setContextTokens] = useState(8192);
 
@@ -339,6 +350,7 @@ export default function CookbookPage() {
               sublabel={hfSublabel}
               quantLabel={() => "—"}
               notes={hfNotes}
+              onRowClick={(m) => navigate(`/models?repo=${encodeURIComponent(m.id)}`)}
             />
           )}
         </div>

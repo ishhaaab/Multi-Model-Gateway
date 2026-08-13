@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-13 — HF model browser UI (two-pane)
+
+- Web SPA — new `/models` two-pane HF model browser: catalog list (search + 10/25/50 dropdown) fed by `GET /v1/hf/models`, detail pane fed by `GET /v1/hf/models/{repo_id}` (stats, description, PARAMS/ARCH/DOMAIN/FORMAT metadata, capability pills, per-quant GGUF fit verdicts + rationale with a shared context-token selector). Download/install pipeline deferred — the Download affordance renders disabled with a "coming soon" hint. Cookbook HF rows navigate into the browser (`/models?repo=<id>`). Types `HfFitVerdict`/`HfQuantOption`/`HfModelDetail`/`HfModelSummary` + `hfApi.detail` added; route + sidebar "Models" nav item.
+
 ## 2026-08-13 — HF model browser follow-up (review fixes)
 
 - Backend: GGUF header walker (`_read_gguf_value`) now skips ARRAY KV payloads in full — fixed-size scalar arrays jump `count × elem_size`, string arrays walk each element — instead of truncating at 4096 elements, which drifted every later key offset on large arrays. Array values are never materialized (the fit fields are all scalars/strings); a payload that overruns the buffer fails the parse instead of silently truncating.

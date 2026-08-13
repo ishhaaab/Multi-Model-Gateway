@@ -15,6 +15,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   KeyRound,
+  Library,
 } from "lucide-react";
 import { useLayoutStore, SIDEBAR_MIN, SIDEBAR_MAX } from "@/stores/layout-store";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -37,6 +38,7 @@ const TOOLS = [
   { to: "/agent", label: "Agent", icon: Bot },
   { to: "/research", label: "Research", icon: Telescope },
   { to: "/cookbook", label: "Cookbook", icon: Cpu },
+  { to: "/models", label: "Models", icon: Library },
   { to: "/trainings", label: "Training", icon: GraduationCap },
   { to: "/providers", label: "Providers", icon: KeyRound },
 ];

@@ -273,7 +273,7 @@ heuristic as the local catalog. New backend contract:
   were added to `frontend/src/lib/types.ts` + `api-endpoints.ts`. The mobile
   port must mirror the tab UI and the nullable `need_gb`/`params_b` handling.
 
-### HF model detail endpoint (per-quant GGUF fit) — backend DONE, SPA NOT STARTED
+### HF model detail endpoint (per-quant GGUF fit) — backend DONE, SPA DONE
 
 The browser's per-model view has a new backend contract (F1). New endpoint +
 response shapes for the model detail screen:
@@ -293,10 +293,35 @@ response shapes for the model detail screen:
   `unknown` (gray, "couldn't read model metadata").
 - **Capabilities** are a best-effort tag scrape (Vision/Tool Use/Reasoning)
   and are often empty — render the list only when non-empty.
-- **SPA status: NOT STARTED.** The cookbook's HF tab lists repos via
-  `hfApi.models`; a detail view would call a new `hfApi.modelDetail(repo_id,
-  context_tokens)` and render the quants table (quant badge, total GB,
-  shard count, fit badge + rationale). Mobile must mirror it.
+- **SPA status: DONE — new `/models` two-pane model browser.**
+  `frontend/src/pages/models.tsx` renders a two-pane layout (list left,
+  detail right) driven by `GET /v1/hf/models` + `GET /v1/hf/models/{repo_id}`:
+  - **Left pane** (`components/models/ModelList.tsx`): search box + 10/25/50
+    results dropdown + Search button; rows show repo id + one-line sub
+    (params/downloads/likes via `formatCompact`, relative "N days ago"
+    timestamp). Clicking a row sets `?repo=<id>` in the URL and opens the
+    detail pane. Loading skeletons / error-retry / empty states included.
+    The list endpoint does NOT return `capabilities`, so list rows omit
+    capability icons by design — pills appear only in the detail pane.
+  - **Right pane** (`components/models/ModelDetail.tsx`): header with repo id
+    + clipboard copy (toast), download/like stats, description, metadata
+    strip (PARAMS / ARCH / DOMAIN / FORMAT pills), capability pills
+    (`components/models/CapabilityBadge.tsx` — Vision=amber eye,
+    Tool Use=blue wrench, Reasoning=green brain, unknown=plain badge), and
+    Download Options: a 2048–32768 context-token selector that refetches the
+    detail, then one row per GGUF quant (`components/models/QuantRow.tsx`) —
+    GGUF pill, quant chip, size GB (2 decimals), fit verdict badge
+    (fits_fully=green / fits_cpu_offload=amber / likely_too_large=red × /
+    cpu_only + unknown=muted) + rationale. The **Download button is rendered
+    disabled with a "coming soon" hint — the install/download pipeline is
+    deferred** (no backend endpoint exists yet).
+  - **Cookbook wiring:** the HF tab's verdict-table rows are now clickable and
+    navigate to `/models?repo=<id>`.
+  - New types (`HfFitVerdict`, `HfQuantOption`, `HfModelDetail`,
+    `HfModelSummary`) in `frontend/src/lib/types.ts`; `hfApi.detail(repo_id,
+    context_tokens)` in `api-endpoints.ts`; route + sidebar "Models" nav item
+    added. The mobile port must mirror the two-pane browser and the deferred
+    download affordance.
 
 ## Phases
 

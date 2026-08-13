@@ -421,3 +421,51 @@ export interface HfCookbookResponse {
   models: HfModelEntry[];
   count: number;
 }
+
+// ───────────── HF model browser (two-pane detail) ─────────────
+// Per-quant GGUF fit verdicts from GET /v1/hf/models/{repo_id}.
+export type HfFitVerdict =
+  | "fits_fully"
+  | "fits_cpu_offload"
+  | "likely_too_large"
+  | "cpu_only"
+  | "unknown";
+
+export interface HfQuantOption {
+  quant: string;
+  size_bytes: number;
+  filenames: string[];
+  is_sharded: boolean;
+  fit: { verdict: HfFitVerdict; score: number; need_gb: number | null; rationale: string };
+}
+
+// GET /v1/hf/models/{repo_id} — full metadata + per-quant fits for one repo.
+export interface HfModelDetail {
+  repo_id: string;
+  downloads: number;
+  likes: number;
+  last_modified: string | null;
+  description: string | null;
+  params_b: number | null;
+  arch: string | null;
+  pipeline_tag: string | null;
+  library_name: string | null;
+  capabilities: string[];
+  formats: string[];
+  quants: HfQuantOption[];
+  has_gguf: boolean;
+  context_tokens: number;
+  hardware: HardwareInfo;
+}
+
+// Left-pane list rows — the subset of HfModelEntry the browser list renders.
+// NOTE: the list endpoint does NOT return `capabilities`, so list rows show
+// name + stats + relative date only; capability pills appear in the detail pane.
+export interface HfModelSummary {
+  id: string;
+  params_b: number | null;
+  downloads: number | null;
+  likes: number | null;
+  lastModified: string | null;
+  pipeline_tag: string | null;
+}

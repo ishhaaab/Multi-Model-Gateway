@@ -41,6 +41,7 @@ import type {
   HardwareInfo,
   CookbookResponse,
   HfCookbookResponse,
+  HfModelDetail,
 } from "./types";
 
 // ───────────── Auth ─────────────
@@ -299,5 +300,11 @@ export const hfApi = {
         limit: String(limit),
         context_tokens: String(contextTokens),
       })}`
+    ),
+
+  detail: (repoId: string, contextTokens: number) =>
+    apiClient.request<HfModelDetail>(
+      "GET",
+      `/v1/hf/models/${encodeURIComponent(repoId)}?context_tokens=${contextTokens}`
     ),
 };
