@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { useChatStore } from "@/stores/chat-store";
+import { useAgentCatalogStore } from "@/stores/agent-catalog-store";
 import { agentApi } from "@/lib/api-endpoints";
 import { ApiError } from "@/lib/api-client";
 import type { AgentEvent, ChatRequest } from "@/lib/types";
@@ -39,6 +40,8 @@ export function useAgent() {
 
       // Reuse the chat composer selections (same ChatRequest body shape).
       const store = useChatStore.getState();
+      const catalog = useAgentCatalogStore.getState();
+      const selectedAgent = catalog.selectedId ? catalog.agents.find((a) => a.id === catalog.selectedId) : null;
       const body: ChatRequest = {
         conversation_id: convoIdRef.current,
         preset_id: store.presetId,
@@ -47,6 +50,7 @@ export function useAgent() {
         stream: true,
         provider: store.provider,
         private: store.isPrivate,
+        ...(selectedAgent ? { agent_id: selectedAgent.id, agent_version: selectedAgent.version } : {}),
       };
 
       const controller = new AbortController();

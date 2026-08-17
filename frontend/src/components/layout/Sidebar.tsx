@@ -34,6 +34,8 @@ const MODES = [
 // Secondary destinations — agent + research + models + providers.
 const TOOLS = [
   { to: "/agent", label: "Agent", icon: Bot },
+  { to: "/agents", label: "Agents", icon: Bot },
+  { to: "/marketplace", label: "Marketplace", icon: Library },
   { to: "/research", label: "Research", icon: Telescope },
   { to: "/models", label: "Models", icon: Library },
   { to: "/providers", label: "Providers", icon: KeyRound },

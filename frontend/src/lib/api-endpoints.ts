@@ -209,7 +209,8 @@ export const agentApi = {
 };
 
 // ───────────── User-created Agents ────────────
-import type { Agent, AgentCreate, AgentUpdate, AgentInstall, FileEdit } from "./types";
+import type { Agent, AgentCreate, AgentUpdate } from "./types";
+import type { AgentInstall, FileEdit } from "./types";
 export const agentsApi = {
   list: (params?: { limit?: number; offset?: number }) =>
     apiClient.request<ListEnvelope<Agent>>(
@@ -220,6 +221,12 @@ export const agentsApi = {
   create: (data: AgentCreate) => apiClient.request<Agent>("POST", "/v1/agents", data),
   update: (id: string, data: AgentUpdate) => apiClient.request<Agent>("PATCH", `/v1/agents/${encodeURIComponent(id)}`, data),
   delete: (id: string) => apiClient.request<{ detail: string }>("DELETE", `/v1/agents/${encodeURIComponent(id)}`),
+  suggest: (goal: string, description?: string) =>
+    apiClient.request<{ name: string; description: string; system_prompt: string; suggested_tools: string[]; suggested_model: string | null }>(
+      "POST",
+      "/v1/agents/suggest",
+      { goal, ...(description ? { description } : {}) }
+    ),
 };
 
 // ───────────── Marketplace (public agents) ────────────

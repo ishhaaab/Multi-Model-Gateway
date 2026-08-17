@@ -14,6 +14,8 @@ import ProvidersPage from "@/pages/providers";
 import TemplatesPage from "@/pages/templates";
 import WorkflowsPage from "@/pages/workflows";
 import AgentPage from "@/pages/agent";
+import AgentsPage from "@/pages/agents";
+import MarketplacePage from "@/pages/marketplace";
 import ResearchPage from "@/pages/research";
 import ModelsPage from "@/pages/models";
 import SettingsPage from "@/pages/settings";
@@ -48,6 +50,8 @@ export default function App() {
           <Route path="/templates" element={<TemplatesPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/agent" element={<AgentPage />} />
+          <Route path="/agents" element={<AgentsPage />} />
+          <Route path="/marketplace" element={<MarketplacePage />} />
           <Route path="/research" element={<ResearchPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
