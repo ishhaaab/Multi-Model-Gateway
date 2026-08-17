@@ -10,7 +10,7 @@ from app.db import Base
 from app.models import (
     users, conversations, messages, refresh_tokens,
     presets, templates, memories, workflows, tool_permissions,
-    research_jobs, providers, memory_files
+    research_jobs, providers, memory_files, agents, agent_installs, file_edits
 )
 
 # this is the Alembic Config object, which provides

@@ -38,6 +38,8 @@ class ChatRequest(BaseModel):
     provider: Provider = Provider.auto
     private: bool = False
     provider_id: Optional[str] = None  # pin a specific configured provider row; overrides all routing heuristics
+    agent_id: Optional[str] = None  # run as this agent; when set, agent's allowed_tools + system_prompt win (ADR-0004)
+    agent_version: Optional[int] = None  # pinned version when using a marketplace agent
 
 
 def get_local_client():

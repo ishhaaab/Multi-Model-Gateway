@@ -39,6 +39,7 @@ from app.models.presets import (
     DEFAULT_MIN_P,
     DEFAULT_REPEAT_PENALTY,
 )
+from app.core.exceptions import ForbiddenError, NotFoundError
 from app.models.tool_permissions import ToolPermission
 from app.services.convo import conversation, load_history, save_messages
 from app.services.memory import store_exchange_memories
@@ -131,6 +132,60 @@ async def get_allowed_tools(user_id: str, db: AsyncSession) -> list[registry.Too
     return [t for t in registry.all_tools() if overrides.get(t.name, t.first_party)]
 
 
+# Code-execution tools gated by the master switch (Q8 C). When
+# ENABLE_CODE_EXECUTION is False these are never offered, even if the
+# per-user ToolPermission says allowed — the switch is the hard ceiling.
+_CODE_TOOLS = frozenset({"bash", "edit_patch", "edit_lines", "write_file"})
+
+
+async def get_allowed_tools_for_agent(
+    agent_id: str | None,
+    agent_version: int | None,
+    user_id: str,
+    db: AsyncSession,
+) -> list[registry.Tool]:
+    """Per-agent filtered tool list with the full safety ceiling.
+
+    Intersection: agent.allowed_tools ∩ per-user ToolPermission ∩ master switch.
+    When agent_id is None, delegates to the legacy global path (backward compat).
+    """
+    if agent_id is None:
+        return await get_allowed_tools(user_id, db)
+
+    # Lazy import to avoid circular deps on startup
+    from app.models.agents import Agent
+
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise NotFoundError("agent not found")
+    # Public agents are readable by anyone authed; private need owner
+    if not agent.is_public and str(agent.user_id) != str(user_id):
+        raise ForbiddenError("unauthorised")
+
+    # Requested set from the agent row (JSONB list of names)
+    requested = set(agent.allowed_tools or [])
+
+    # Per-user ceiling — same query as get_allowed_tools
+    perm_result = await db.execute(
+        select(ToolPermission).where(ToolPermission.user_id == user_id)
+    )
+    overrides = {row.tool_name: row.allowed for row in perm_result.scalars().all()}
+
+    def _is_allowed(tool: registry.Tool) -> bool:
+        # Must be requested by the agent AND allowed for this user
+        if tool.name not in requested:
+            return False
+        if not overrides.get(tool.name, tool.first_party):
+            return False
+        # Master switch gates code-execution tools
+        if tool.name in _CODE_TOOLS and not settings.ENABLE_CODE_EXECUTION:
+            return False
+        return True
+
+    return [t for t in registry.all_tools() if _is_allowed(t)]
+
+
 async def _execute_tool(tool: registry.Tool, raw_args: str, ctx: registry.ToolContext) -> str:
     """Run one tool call. Failures come back as strings so the model can
     see what went wrong and adapt instead of the whole run dying."""
@@ -157,27 +212,73 @@ async def _execute_tool(tool: registry.Tool, raw_args: str, ctx: registry.ToolCo
 
 
 async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession):
+    # Resolve agent override if the client is running as an agent (ADR-0004).
+    # When agent_id is set, the agent's system_prompt and filtered allowed_tools win;
+    # otherwise the legacy global-agent path is unchanged (backward compat).
+    agent_id = getattr(request, "agent_id", None)
+    agent_version = getattr(request, "agent_version", None)
+    agent = None
+    if agent_id:
+        # Lazy import to avoid cycle
+        from app.models.agents import Agent
+
+        result = await db.execute(select(Agent).where(Agent.id == agent_id))
+        agent = result.scalar_one_or_none()
+        if agent is None:
+            raise NotFoundError("agent not found")
+        if not agent.is_public and str(agent.user_id) != str(user_id):
+            raise ForbiddenError("unauthorised")
+        # Agent's own max_iterations/token_budget override the global settings
+        # only for this run — preset fallback stays for non-agent chats.
+
     conversation_id = None
     try:
+        # Persist agent binding on the conversation so history + memory scoping
+        # can be per-agent (stores the resolved version, not just the id).
+        if agent_id and request.conversation_id is None:
+            # New conversation — inject agent binding into the convo creation
+            # so conversation() sees it. We stash it on the request for the
+            # convo helper which reads request.agent_id (set above).
+            pass
         conversation_id = await conversation(request, user_id, db)
+        # If this is an existing conversation being continued as an agent chat,
+        # ensure the conversation's agent_id is set/updated for scoping.
+        if agent_id:
+            from app.models.conversations import Conversation as ConvRow
+
+            cres = await db.execute(select(ConvRow).where(ConvRow.id == conversation_id))
+            crow = cres.scalar_one_or_none()
+            if crow is not None and crow.agent_id is None:
+                crow.agent_id = agent_id
+                crow.agent_version = agent_version if agent_version is not None else agent.version
+                await db.commit()
         user_content = request.messages[-1].content
         history = await load_history(conversation_id, user_content, db)
         messages = history + [{"role": "user", "content": user_content}]
-        if preset and preset.system_prompt:
-            messages = [{"role": "system", "content": preset.system_prompt}] + messages
+        # Agent system_prompt wins over preset when running as an agent
+        effective_system_prompt = (agent.system_prompt if agent and agent.system_prompt else None) or (
+            preset.system_prompt if preset and preset.system_prompt else None
+        )
+        if effective_system_prompt:
+            messages = [{"role": "system", "content": effective_system_prompt}] + messages
 
         # Memory-file index injection (Tier 1 index + Tier 1.5 full files) —
         # built BEFORE the connection is released below; best-effort, a memory
         # failure must never fail the request.
         memory_context = await safe_build_memory_context(db, user_id)
         if memory_context:
-            if preset and preset.system_prompt:
-                messages[0]["content"] = preset.system_prompt + "\n\n" + memory_context
+            if effective_system_prompt:
+                messages[0]["content"] = effective_system_prompt + "\n\n" + memory_context
             else:
                 messages = [{"role": "system", "content": memory_context}] + messages
 
         ctx = registry.ToolContext(user_id=user_id, conversation_id=conversation_id, db=db)
-        allowed = await get_allowed_tools(user_id, db)
+        # Extend context with agent binding for workspace/file tools
+        ctx.agent_id = agent_id  # type: ignore[attr-defined]
+        if agent_id:
+            allowed = await get_allowed_tools_for_agent(agent_id, agent_version, user_id, db)
+        else:
+            allowed = await get_allowed_tools(user_id, db)
         tools_by_name = {t.name: t for t in allowed}
         tool_schemas = [registry.openai_schema(t) for t in allowed]
 
@@ -328,7 +429,11 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
         spawn(enqueue_curation(str(user_id), str(conversation_id), written_paths,
                                private=request.private))
 
-        yield _sse({"type": "done", "conversation_id": conversation_id, "truncated": truncated})
+        done_evt: dict = {"type": "done", "conversation_id": conversation_id, "truncated": truncated}
+        if agent_id:
+            done_evt["agent_id"] = agent_id
+            done_evt["agent_version"] = agent_version if agent_version is not None else (agent.version if agent else None)
+        yield _sse(done_evt)
 
     except APIError as e:
         logger.error("Provider API error in agent run: %s", repr(e))

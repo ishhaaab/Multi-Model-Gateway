@@ -208,6 +208,53 @@ export const agentApi = {
     apiClient.streamEvents<AgentEvent>("POST", "/v1/agent/chat", body, signal),
 };
 
+// ───────────── User-created Agents ────────────
+import type { Agent, AgentCreate, AgentUpdate, AgentInstall, FileEdit } from "./types";
+export const agentsApi = {
+  list: (params?: { limit?: number; offset?: number }) =>
+    apiClient.request<ListEnvelope<Agent>>(
+      "GET",
+      `/v1/agents${params ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}` : ""}`
+    ),
+  get: (id: string) => apiClient.request<Agent>("GET", `/v1/agents/${encodeURIComponent(id)}`),
+  create: (data: AgentCreate) => apiClient.request<Agent>("POST", "/v1/agents", data),
+  update: (id: string, data: AgentUpdate) => apiClient.request<Agent>("PATCH", `/v1/agents/${encodeURIComponent(id)}`, data),
+  delete: (id: string) => apiClient.request<{ detail: string }>("DELETE", `/v1/agents/${encodeURIComponent(id)}`),
+};
+
+// ───────────── Marketplace (public agents) ────────────
+// Backed by GET /v1/marketplace/agents and POST /v1/agents/{id}/install in T2.
+export const marketplaceApi = {
+  list: (params?: { limit?: number; offset?: number }) =>
+    apiClient.request<ListEnvelope<Agent>>(
+      "GET",
+      `/v1/marketplace/agents${params ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}` : ""}`
+    ),
+  myInstalls: () => apiClient.request<ListEnvelope<AgentInstall>>("GET", "/v1/agents/installs"),
+  install: (agentId: string) =>
+    apiClient.request<AgentInstall>("POST", `/v1/agents/${encodeURIComponent(agentId)}/install`, {}),
+  uninstall: (agentId: string) =>
+    apiClient.request<{ detail: string }>("DELETE", `/v1/agents/${encodeURIComponent(agentId)}/install`),
+};
+
+// ───────────── Workspace (per-user-per-agent files + undo) ────────────
+export const workspaceApi = {
+  files: (agentId: string, path = ".") =>
+    apiClient.request<{ files: string[] }>("GET", `/v1/agents/${encodeURIComponent(agentId)}/workspace/files?path=${encodeURIComponent(path)}`),
+  file: (agentId: string, path: string) =>
+    apiClient.request<{ content: string; lines: { n: number; hash: string; text: string }[] }>(
+      "GET",
+      `/v1/agents/${encodeURIComponent(agentId)}/workspace/file?path=${encodeURIComponent(path)}`
+    ),
+  edits: (agentId: string, params?: { limit?: number; offset?: number }) =>
+    apiClient.request<ListEnvelope<FileEdit>>(
+      "GET",
+      `/v1/agents/${encodeURIComponent(agentId)}/workspace/edits${params ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}` : ""}`
+    ),
+  undo: (agentId: string, editId: string) =>
+    apiClient.request<FileEdit>("POST", `/v1/agents/${encodeURIComponent(agentId)}/workspace/undo`, { edit_id: editId }),
+};
+
 // ───────────── Deep Research ─────────────
 export const researchApi = {
   create: (query: string, provider?: string, model?: string) =>

@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from app.routers import chat, models, auth, convo, presets, templates, images, workflows, agent, research, hardware, hf, providers
+from app.routers import chat, models, auth, convo, presets, templates, images, workflows, agent, agents, research, hardware, hf, providers
 from app.middleware.ratelimit import RateLimitMiddleware
 from app.core.redis import get_redis, close_redis
 from app.core.config import settings
@@ -81,6 +81,7 @@ app.include_router(templates.router, prefix="/v1")
 app.include_router(images.router, prefix="/v1")
 app.include_router(workflows.router, prefix="/v1")
 app.include_router(agent.router, prefix="/v1")
+app.include_router(agents.router, prefix="/v1")
 app.include_router(research.router, prefix="/v1")
 app.include_router(hardware.router, prefix="/v1")
 app.include_router(hf.router, prefix="/v1")

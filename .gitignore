@@ -16,3 +16,4 @@ frontend/.env.production
 comfy-checkpoints/
 .repowise
 CONTEXT.MD
+.scratch/

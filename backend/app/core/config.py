@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     AGENT_TOKEN_BUDGET: int = 24000      # total prompt+completion tokens per agent run
     TOOL_TIMEOUT_SECONDS: int = 30       # per tool execution
     TOOL_RESULT_MAX_CHARS: int = 8000    # tool output fed back to the model is truncated to this
+    ENABLE_CODE_EXECUTION: bool = False  # master switch for bash/edit_patch/file tools (Q8 C)
     WEB_SEARCH_MAX_RESULTS: int = 5
     SEARXNG_URL: str = ""                # optional self-hosted SearXNG; empty => DuckDuckGo HTML fallback
     # JSON list of MCP servers to connect at startup, e.g.

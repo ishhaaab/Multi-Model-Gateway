@@ -17,6 +17,7 @@ class ToolContext:
     user_id: str
     conversation_id: str
     db: AsyncSession
+    agent_id: str | None = None  # set when the run is as an agent (ADR-0004)
 
 
 @dataclass

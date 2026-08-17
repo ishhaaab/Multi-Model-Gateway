@@ -39,6 +39,12 @@ export interface ChatRequest {
   stream?: boolean;
   provider?: Provider;
   private?: boolean;
+  // Optional agent binding — when set the backend runs as that agent
+  // (agent's system_prompt + filtered allowed_tools win; ADR-0004).
+  agent_id?: string | null;
+  agent_version?: number | null;
+  // Pin a specific provider row; overrides routing heuristics
+  provider_id?: string | null;
 }
 
 // ───────────── Conversations ─────────────
@@ -268,13 +274,67 @@ export interface AgentToolInfo {
   allowed: boolean;
 }
 
+// ───────────── Agents ────────────
+export interface Agent {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  system_prompt: string | null;
+  preset_id: string | null;
+  provider: string | null;
+  model: string | null;
+  allowed_tools: string[];
+  max_iterations: number;
+  token_budget: number;
+  is_public: boolean;
+  version: number;
+  created_at: string;
+}
+
+export interface AgentCreate {
+  name: string;
+  description?: string | null;
+  system_prompt?: string | null;
+  preset_id?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  allowed_tools?: string[];
+  max_iterations?: number;
+  token_budget?: number;
+  is_public?: boolean;
+}
+
+export type AgentUpdate = Partial<AgentCreate>;
+
+export interface AgentInstall {
+  id: string;
+  user_id: string;
+  agent_id: string;
+  pinned_version: number;
+  created_at: string;
+}
+
+export interface FileEdit {
+  id: string;
+  user_id: string;
+  agent_id: string | null;
+  store: string;
+  path: string;
+  patch: string;
+  before_hash: string | null;
+  after_hash: string | null;
+  tool_call_id: string | null;
+  created_at: string;
+}
+
 // SSE events from POST /v1/agent/chat (one JSON object per `data:` line).
 export type AgentEvent =
   | { type: "tool_call"; id: string; name: string; arguments: string }
   | { type: "tool_result"; id: string; name: string; content: string }
   | { type: "token"; content: string }
   | { type: "error"; message: string }
-  | { type: "done"; conversation_id: string };
+  | { type: "done"; conversation_id: string; truncated?: boolean; agent_id?: string; agent_version?: number };
 
 // ───────────── Deep Research ─────────────
 export type ResearchStatus =

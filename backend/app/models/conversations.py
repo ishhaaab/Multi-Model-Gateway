@@ -12,6 +12,8 @@ class Conversation(Base):
     title= Column(String)
     created_at= Column(DateTime, default=datetime.datetime.utcnow)
     token_count= Column(Integer, default=0 )
+    agent_id = Column(UUID, ForeignKey("agents.id", ondelete="SET NULL"), nullable=True, index=True)
+    agent_version = Column(Integer, nullable=True)
 
     
 
