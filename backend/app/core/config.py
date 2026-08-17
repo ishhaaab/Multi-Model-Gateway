@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     TOOL_TIMEOUT_SECONDS: int = 30       # per tool execution
     TOOL_RESULT_MAX_CHARS: int = 8000    # tool output fed back to the model is truncated to this
     ENABLE_CODE_EXECUTION: bool = False  # master switch for bash/edit_patch/file tools (Q8 C)
+    # Workspace + sandbox (T3, ADR-0002). Named volume workspaces:/workspaces.
+    SANDBOX_URL: str = "http://sandbox:8001"  # backend -> sandbox exec
+    SANDBOX_EXEC_TIMEOUT: int = 30
+    SANDBOX_DISK_QUOTA_MB: int = 1024
+    SANDBOX_MEMORY_MB: int = 512
+    SANDBOX_IDLE_TTL_S: int = 1800
+    SANDBOX_ALLOWLIST: str = "pypi.org,github.com,npmjs.org"
+    WORKSPACE_ROOT: str = "/workspaces"
     WEB_SEARCH_MAX_RESULTS: int = 5
     SEARXNG_URL: str = ""                # optional self-hosted SearXNG; empty => DuckDuckGo HTML fallback
     # JSON list of MCP servers to connect at startup, e.g.
