@@ -95,11 +95,6 @@ class Settings(BaseSettings):
     KV_CACHE_BYTES_PER_ELEMENT: float = 2.0
     # headroom applied to the "fits fully" verdict threshold (0.10 = 10%)
     FIT_SAFETY_MARGIN: float = 0.10
-    # Total host RAM in MB, used for the RAM-offload fit verdict. 0 = auto-detect
-    # from /proc/meminfo. Set explicitly when the backend runs in a VM whose
-    # /proc/meminfo under-reports (e.g. Docker Desktop's WSL2 backend — it reports
-    # the VM's memory allocation, not the host's physical RAM).
-    HOST_RAM_MB: int = 0
 
     DATABASE_URL: str
     DB_POOL_SIZE: int = 20

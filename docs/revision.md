@@ -1095,7 +1095,7 @@ probe_hardware() → {"gpu_available": bool, "gpus": [{index, name, vram_total_m
 
 Two attempts, then graceful surrender: **pynvml** (NVML bindings — needs the NVIDIA driver visible in the container, i.e. compose `gpus: all` + nvidia-container-toolkit) → **`nvidia-smi` subprocess** (`--query-gpu=name,memory.total,memory.free --format=csv`, 10s timeout) → `{"gpu_available": false}`. Every failure path is caught; the endpoint never 500s for "no GPU".
 
-`ram_total_mb` is read from `/proc/meminfo` (`_probe_ram`) but honors the `HOST_RAM_MB` setting: when it's > 0 the configured value wins, otherwise the probe runs. Set `HOST_RAM_MB` when the container's `/proc/meminfo` under-reports host RAM — Docker Desktop's WSL2 backend reports the VM's memory allocation, not the host's physical RAM.
+`ram_total_mb` is read from `/proc/meminfo` (`_probe_ram`).
 
 ### `services/fit_score.py` — the catalog and the heuristic
 

@@ -2,14 +2,10 @@
 fallback, clean degradation to CPU-only when neither works (no NVIDIA driver,
 or the container has no GPU access — needs nvidia-container-toolkit + a
 `gpus`/deploy.resources grant in compose). Total system RAM is read from
-`/proc/meminfo` (Linux only) so fit scoring can factor RAM offload; set
-`HOST_RAM_MB` to override the auto-detected value when the container's
-`/proc/meminfo` under-reports host RAM (e.g. Docker Desktop's WSL2 backend).
+`/proc/meminfo` (Linux only) so fit scoring can factor RAM offload.
 """
 import asyncio
 import logging
-
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +96,8 @@ async def probe_hardware() -> dict:
     gpus = _probe_pynvml()
     if gpus is None:
         gpus = await _probe_nvidia_smi()
-    ram_total_mb = settings.HOST_RAM_MB if settings.HOST_RAM_MB > 0 else _probe_ram()
     return {
         "gpu_available": bool(gpus),
         "gpus": gpus or [],
-        "ram_total_mb": ram_total_mb,
+        "ram_total_mb": _probe_ram(),
     }
