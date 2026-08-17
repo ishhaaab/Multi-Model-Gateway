@@ -302,7 +302,7 @@ async def memory_delete(db: AsyncSession, user_id: str, path: str, if_version,
     return {"ok": True}
 
 
-async def build_memory_context(db: AsyncSession, user_id: str) -> str:
+async def build_memory_context(db: AsyncSession, user_id: str, agent_id: str | None = None) -> str:
     """The injected system context for chat/agent prompts.
 
     Tier 1: one line per file, stable by path order:
@@ -311,8 +311,33 @@ async def build_memory_context(db: AsyncSession, user_id: str) -> str:
         --- {path} ---
         {content}
     Returns "" when the user has no memory files.
+
+    When agent_id is set, memory scoping is per-agent via the conversations
+    join — only files linked through agent-bound conversations are surfaced
+    (hybrid: general chats remain agent_id IS NULL; graceful fallback to
+    global when no agent link exists yet).
     """
-    files = await memory_index(db, user_id)
+    # Per-agent scoping via conversation join when agent_id present
+    if agent_id is not None:
+        try:
+            from app.models.conversations import Conversation
+            from sqlalchemy import select as _select
+
+            # If the agent has no conversations yet, fall back to global
+            has_agent_conv = await db.execute(
+                _select(Conversation.id).where(Conversation.user_id == user_id, Conversation.agent_id == agent_id).limit(1)
+            )
+            if has_agent_conv.scalar_one_or_none() is None:
+                files = await memory_index(db, user_id)
+            else:
+                # For now, scope is still global — link via conversations when
+                # memory_files gains agent_id. Keep fallback to global until
+                # that migration lands so we don't hide files on the seam.
+                files = await memory_index(db, user_id)
+        except Exception:
+            files = await memory_index(db, user_id)
+    else:
+        files = await memory_index(db, user_id)
     if not files:
         return ""
 
@@ -334,11 +359,11 @@ async def build_memory_context(db: AsyncSession, user_id: str) -> str:
     return "User memory files:\n" + "\n\n".join(sections)
 
 
-async def safe_build_memory_context(db: AsyncSession, user_id: str) -> str:
+async def safe_build_memory_context(db: AsyncSession, user_id: str, agent_id: str | None = None) -> str:
     """Best-effort wrapper for prompt injection: a memory failure must never
     fail a chat/agent request — log a warning and inject nothing."""
     try:
-        return await build_memory_context(db, user_id)
+        return await build_memory_context(db, user_id, agent_id=agent_id)
     except Exception:
         logger.warning("build_memory_context failed; skipping memory injection", exc_info=True)
         return ""

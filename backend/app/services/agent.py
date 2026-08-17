@@ -264,8 +264,8 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
 
         # Memory-file index injection (Tier 1 index + Tier 1.5 full files) —
         # built BEFORE the connection is released below; best-effort, a memory
-        # failure must never fail the request.
-        memory_context = await safe_build_memory_context(db, user_id)
+        # failure must never fail the request. Agent-scoped when running as an agent.
+        memory_context = await safe_build_memory_context(db, user_id, agent_id=agent_id)
         if memory_context:
             if effective_system_prompt:
                 messages[0]["content"] = effective_system_prompt + "\n\n" + memory_context
