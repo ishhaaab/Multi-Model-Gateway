@@ -11,7 +11,7 @@ const blobCache = new Map<string, string>();
 export async function resolveImageUrl(path: string): Promise<string> {
   const cached = blobCache.get(path);
   if (cached) return cached;
-  if (!path.startsWith("/v1/images/") && !path.startsWith("/v1/trainings/")) {
+  if (!path.startsWith("/v1/images/")) {
     throw new Error("unresolvable image URL");
   }
   const { blob } = await apiClient.fetchBlob(path);
@@ -21,7 +21,7 @@ export async function resolveImageUrl(path: string): Promise<string> {
 }
 
 /**
- * Download a backend file (e.g. a trained LoRA .safetensors) through the
+ * Download a backend file (e.g. a file from the backend) through the
  * authed API: fetch as a blob, then trigger a browser download under the
  * given filename via a temporary anchor.
  */

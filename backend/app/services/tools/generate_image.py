@@ -58,9 +58,7 @@ async def _generate_image(args: dict, ctx: ToolContext) -> str:
         except (TypeError, ValueError):
             seed = None
 
-    # training_id is accepted for schema parity with POST /v1/images/generate;
-    # LoRA resolution (the images router's _prepare_training_lora) is not wired
-    # into this tool yet — generation always uses the base workflow, no LoRA.
+    # Generation always uses the base workflow.
     try:
         # One guard for the whole body: Redis acquire, ownership registration,
         # ComfyUI submission, polling and imgfile registration all fail as
@@ -78,7 +76,6 @@ async def _generate_image(args: dict, ctx: ToolContext) -> str:
             aspect_ratio=aspect_ratio,
             batch_size=1,
             seed=seed,
-            lora_name=None,
         )
         await redis.set(f"imgjob:{prompt_id}", str(ctx.user_id), ex=JOB_TTL_SECONDS)
 
@@ -152,10 +149,6 @@ register(Tool(
             "seed": {
                 "type": "integer",
                 "description": "Optional seed for reproducible output",
-            },
-            "training_id": {
-                "type": "string",
-                "description": "Optional training job id for a LoRA (reserved)",
             },
         },
         "required": ["prompt"],

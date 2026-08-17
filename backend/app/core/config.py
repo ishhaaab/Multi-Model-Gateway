@@ -13,41 +13,6 @@ class Settings(BaseSettings):
     COMFY_URL: str = "http://host.docker.internal:8188"   # ComfyUI server for image generation
     IMAGE_FILE_TTL_SECONDS: int = 604800   # ownership TTL for generated image filenames
 
-    # HOST path of your ComfyUI models/loras folder; used by docker-compose as
-    # the bind source mounted into the backend container at
-    # COMFY_LORA_CONTAINER_PATH. When unset, using a trained LoRA on image
-    # generation returns a 400 (the mount isn't configured).
-    COMFY_LORA_DIR: str = ""
-
-    # path INSIDE the container the backend writes trained LoRAs to; must match
-    # the compose mount target for ${COMFY_LORA_DIR}. When running the backend
-    # on the host directly, set both to the same real folder.
-    COMFY_LORA_CONTAINER_PATH: str = "/comfy-loras"
-
-    # HOST path to your SDXL model for training (a diffusers-format folder OR
-    # a directory containing a single-file .safetensors checkpoint). Mounted
-    # into the trainer container at /models/sdxl. Leave empty to fall back to
-    # the Hugging Face model (large download — not recommended).
-    SDXL_MODEL_PATH: str = ""
-
-    # optional filename inside SDXL_MODEL_PATH when it points at a directory of
-    # checkpoints (e.g. "sdxl-base.safetensors").
-    SDXL_MODEL_NAME: str = ""
-
-    # HOST path to your SD1 (stable-diffusion-1.x) model for training (a
-    # diffusers-format folder OR a directory containing a single-file
-    # .safetensors checkpoint). Mounted into the trainer container at
-    # /models/sd1. Leave empty to fall back to the Hugging Face model
-    # (~4GB download — not recommended).
-    SD1_MODEL_PATH: str = ""
-
-    # optional filename inside SD1_MODEL_PATH when it points at a directory of
-    # checkpoints (e.g. "sd15-base.safetensors").
-    SD1_MODEL_NAME: str = ""
-
-    TRAINING_ROOT: str = "/app/training_data"   # shared volume for fine-tuning datasets + artifacts
-    TRAINING_JOB_TIMEOUT_SECONDS: int = 7200    # max wall-clock for one image-LoRA training run
-
     
     APP_HOST: str = "0.0.0.0"
     APP_PORT:int=8008
@@ -123,7 +88,7 @@ class Settings(BaseSettings):
     COOKBOOK_CONTEXT_TOKENS: int = 8192    # context size assumed for KV-cache estimates
 
     # Hugging Face model browser (F1): optional token for higher rate limits +
-    # gated repos (empty = anonymous). The LoRA trainer also reads HF_TOKEN.
+    # gated repos (empty = anonymous). Hugging Face token for gated repos
     HF_TOKEN: str = ""
     # bytes per KV-cache element for the GGUF fit formula (f16 = 2 bytes; verify
     # against the runtime — LM Studio / llama.cpp report their KV type)

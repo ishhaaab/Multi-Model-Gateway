@@ -19,7 +19,7 @@ import { toast } from "@/stores/ui-store";
 import { useImageGeneration } from "@/hooks/use-image";
 import type { CompletedGeneration } from "@/hooks/use-image";
 import type { ImageResult } from "@/lib/types";
-import { imageApi, trainingApi } from "@/lib/api-endpoints";
+import { imageApi } from "@/lib/api-endpoints";
 import { useResolvedImageUrl } from "@/lib/authed-image";
 import { cn, aspectRatioShort, formatRelativeTime, truncate } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
@@ -125,10 +125,6 @@ export default function ImagesPage() {
   const [cfg, setCfg] = useState(1.2);
   const [templateId, setTemplateId] = useState<string>("");
   const [workflowId, setWorkflowId] = useState<string>("");
-  const [trainingId, setTrainingId] = useState<string>("");
-  const [trainingOptions, setTrainingOptions] = useState<{ value: string; label: string }[]>([
-    { value: "", label: "None (no LoRA)" },
-  ]);
   const [batchSize, setBatchSize] = useState(1);
   const [randomSeed, setRandomSeed] = useState(true);
   const [seed, setSeed] = useState("");
@@ -168,30 +164,6 @@ export default function ImagesPage() {
     void loadAspectRatios();
   }, [loadAspectRatios]);
 
-  // Completed LoRA trainings become pickable on the generate form. setState
-  // only inside promise callbacks (the authed-image async pattern) so a stale
-  // response can never overwrite the current list.
-  useEffect(() => {
-    let cancelled = false;
-    trainingApi
-      .list()
-      .then(({ data }) => {
-        if (cancelled) return;
-        const completed = data.filter((j) => j.status === "complete");
-        setTrainingOptions([
-          { value: "", label: "None (no LoRA)" },
-          ...completed.map((j) => ({ value: j.id, label: j.name })),
-        ]);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setTrainingOptions([{ value: "", label: "None (no LoRA)" }]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const onComplete = (result: CompletedGeneration) => {
     addImageHistory({
       promptId: result.promptId,
@@ -212,7 +184,6 @@ export default function ImagesPage() {
         negative_prompt: negative.trim() || NEG_DEFAULT,
         template_id: templateId || null,
         workflow_id: workflowId || null,
-        training_id: trainingId || null,
         steps,
         cfg,
         // Omit when unknown so the backend applies its own default.
@@ -355,16 +326,6 @@ export default function ImagesPage() {
                     value={workflowId}
                     options={workflowOptions}
                     onChange={setWorkflowId}
-                    className="w-full"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-text-secondary">Trained LoRA</label>
-                  <Dropdown
-                    value={trainingId}
-                    options={trainingOptions}
-                    onChange={setTrainingId}
                     className="w-full"
                   />
                 </div>

@@ -22,10 +22,6 @@ services:
       - "127.0.0.1:2727:8000"
     volumes:
       - ./backend:/app
-      - training_data:/app/training_data
-      # host ComfyUI models/loras folder (or a local default) so trained LoRAs
-      # written by the API land where ComfyUI can load them
-      - ${COMFY_LORA_DIR:-./comfy-loras}:/comfy-loras
     env_file:
       - .env
     secrets:
@@ -57,38 +53,6 @@ services:
     depends_on:
       - postgres
       - redis
-
-  # image-LoRA training worker (ai-toolkit); GPU required
-  trainer:
-    build:
-      context: ./backend
-      target: trainer
-    command: arq app.trainer_worker.WorkerSettings
-    volumes:
-      - ./backend:/app
-      - training_data:/app/training_data
-      # HF download cache (safety checker etc.) persists across container recreates
-      - hf_cache:/root/.cache/huggingface
-      # SDXL_MODEL_PATH is the host folder holding your local SDXL model for
-      # training; the trainer looks for SDXL_MODEL_NAME inside it (or uses
-      # /models/sdxl directly when SDXL_MODEL_NAME is empty). Unset var defaults
-      # to ./comfy-checkpoints — an empty dir Docker will create (gitignored).
-      - ${SDXL_MODEL_PATH:-./comfy-checkpoints}:/models/sdxl
-      # SD1_MODEL_PATH is the host folder holding your local SD1 model for
-      # training; the trainer looks for SD1_MODEL_NAME inside it (or uses
-      # /models/sd1 directly when SD1_MODEL_NAME is empty). Unset var defaults
-      # to ./comfy-checkpoints — an empty dir Docker will create (gitignored).
-      - ${SD1_MODEL_PATH:-./comfy-checkpoints}:/models/sd1
-    env_file:
-      - .env
-    secrets:
-      - openrouter_api_key
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      - postgres
-      - redis
-    gpus: all
 
   # optional self-hosted search for web_search + deep research:
   # start with `docker compose --profile search up` and set
@@ -137,8 +101,6 @@ services:
 volumes:
   pgdata:
   grafana-data:
-  training_data:
-  hf_cache:
 
 
 secrets:

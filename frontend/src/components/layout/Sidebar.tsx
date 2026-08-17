@@ -7,7 +7,6 @@ import {
   ImageIcon,
   Bot,
   Telescope,
-  GraduationCap,
   Settings,
   LogOut,
   MessagesSquare,
@@ -37,7 +36,6 @@ const TOOLS = [
   { to: "/agent", label: "Agent", icon: Bot },
   { to: "/research", label: "Research", icon: Telescope },
   { to: "/models", label: "Models", icon: Library },
-  { to: "/trainings", label: "Training", icon: GraduationCap },
   { to: "/providers", label: "Providers", icon: KeyRound },
 ];
 

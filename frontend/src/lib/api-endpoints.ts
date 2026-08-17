@@ -33,11 +33,6 @@ import type {
   ResearchJobDetail,
   ResearchCreateResponse,
   ResearchEvent,
-  TrainingBaseModel,
-  TrainingJob,
-  TrainingJobDetail,
-  TrainingCreateResponse,
-  TrainingEvent,
   HardwareInfo,
   CookbookResponse,
   HfCookbookResponse,
@@ -232,51 +227,6 @@ export const researchApi = {
   // SSE: progress / done / error (JSON per `data:` line); snapshot-on-connect.
   stream: (id: string, signal?: AbortSignal) =>
     apiClient.streamEvents<ResearchEvent>("GET", `/v1/research/${id}/stream`, undefined, signal),
-};
-
-// ───────────── LoRA Training ─────────────
-export const trainingApi = {
-  /** Multipart create — dataset zip upload. */
-  create: (data: {
-    name: string;
-    base_model: TrainingBaseModel;
-    dataset: File;
-    steps: number;
-    learning_rate: number;
-    resolution?: number;
-  }) => {
-    const form = new FormData();
-    form.append("name", data.name);
-    form.append("base_model", data.base_model);
-    form.append("dataset", data.dataset);
-    form.append("steps", String(data.steps));
-    form.append("learning_rate", String(data.learning_rate));
-    if (data.resolution !== undefined && data.resolution !== null) {
-      form.append("resolution", String(data.resolution));
-    }
-    return apiClient.request<TrainingCreateResponse>("POST", "/v1/trainings", form);
-  },
-
-  list: () => apiClient.request<ListEnvelope<TrainingJob>>("GET", "/v1/trainings"),
-
-  get: (id: string) =>
-    apiClient.request<TrainingJobDetail>("GET", `/v1/trainings/${id}`),
-
-  cancel: (id: string) =>
-    apiClient.request<{ id: string; status: string }>(
-      "POST",
-      `/v1/trainings/${id}/cancel`
-    ),
-
-  // SSE: progress / done / error (JSON per `data:` line); snapshot-on-connect.
-  stream: (id: string, signal?: AbortSignal) =>
-    apiClient.streamEvents<TrainingEvent>("GET", `/v1/trainings/${id}/stream`, undefined, signal),
-
-  /** Download path for downloadAuthedFile (the .safetensors artifact). */
-  artifactPath: (id: string) => `/v1/trainings/${id}/artifact`,
-
-  /** Sample-image path for AuthedImage. */
-  samplePath: (id: string) => `/v1/trainings/${id}/sample`,
 };
 
 // ───────────── Cookbook / Hardware ─────────────

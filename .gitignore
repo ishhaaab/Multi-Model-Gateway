@@ -14,3 +14,4 @@ monitoring/metrics_token
 frontend/.env.production
 *.png
 comfy-checkpoints/
+.repowise

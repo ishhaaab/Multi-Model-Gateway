@@ -100,59 +100,6 @@ fallback. The contract additions the mobile app must handle:
   ("Please sign in with your credentials.") since a 200 no longer means an account
   was created. The mobile port must mirror this handling.
 
-### Training (image LoRA fine-tuning, backend Phase 6)
-
-The backend now lets users train image LoRAs from a zip of images and use the result on
-image generation. New endpoints:
-
-- `POST /v1/trainings` — multipart form: `name`, `base_model` (`flux-dev` | `sdxl` | `sd1`),
-  `dataset` (zip of 3+ images; optional `{image}.txt` captions ride along), `steps`
-  (default 1000), `learning_rate` (default 1e-4), `resolution` (default 1024, or 512 for
-  `sd1`; the training width=height in pixels, 256–2048 — lower it like 512 for small GPUs,
-  FLUX and SD1 are capped at 1024 server-side). Returns `{job_id, status: "queued"}`.
-- `GET /v1/trainings` — list this user's jobs (newest first, capped at 50).
-- `GET /v1/trainings/{id}` — detail; 404 for missing or foreign jobs.
-- `POST /v1/trainings/{id}/cancel` — sets a Redis flag the trainer checks between steps.
-- `GET /v1/trainings/{id}/stream` — SSE of `{"type":"progress"|"done"|"error"}` events on
-  channel `train:{id}`; `progress` carries `stage` + 0-100 `progress`; `done` carries
-  `artifact_filename` (and `sample_image` when complete).
-- `GET /v1/trainings/{id}/artifact` — downloads the trained `.safetensors`.
-- `GET /v1/trainings/{id}/sample` — authed sample-image preview (404 unless the job is
-  complete and a sample exists; media type guessed from the extension).
-
-**`TrainingJob` summary shape** (list items; detail adds `params`, `sample_image`): `id`,
-`name`, `base_model`, `status` (`queued|running|complete|failed|cancelled`), `stage`,
-`progress`, `created_at`, `artifact_filename`, `sample_image`, `error`. The detail response
-**no longer includes `dataset_dir`** (the absolute server path was removed — the SPA never
-used it; the `TrainingJobDetail` type was updated to match).
-
-**`ImageRequest`** now accepts `training_id` — uses a trained LoRA from a completed job
-(the backend injects a ComfyUI `LoraLoader` node). Requires `COMFY_LORA_DIR` (host folder)
-+ `COMFY_LORA_CONTAINER_PATH` (container path the backend writes to) configured server-side;
-errors: 404 unknown/foreign job, 409 job not complete, 400 `COMFY_LORA_DIR` unset. The
-generate response gains `"lora"` (the filename ComfyUI loaded).
-
-- **Mobile implications:**
-  - Add a **"Train" screen**: upload an image zip (`expo-document-picker`), pick base
-    model + steps + learning rate + resolution, show a progress card driven by the SSE
-    stream (stage + progress bar), and a link to download/open the artifact when `done`
-    arrives.
-  - Add a **trained-LoRA picker on the image generation screen**: `GET /v1/trainings`
-    filtered to `status == "complete"`, send the chosen job id as `training_id` on
-    generate; surface the 400/404/409 error strings verbatim.
-  - Port the new endpoints into `api-endpoints.ts` / `types.ts`; the SSE stream uses the
-    same `streamEvents` helper as research.
-  - **Web SPA status: DONE.** `frontend/src/pages/trainings.tsx` + `components/trainings/TrainingForm.tsx`
-    + `TrainingCard.tsx` + `stores/training-store.ts` + `hooks/use-training-job.ts`
-    implement the full screen — dataset zip upload (multipart via FormData), base model /
-    steps / learning rate / resolution fields, live SSE progress on each job card, cancel,
-    `.safetensors` download (`downloadAuthedFile`), and an authed sample-image preview
-    (`AuthedImage` via the new `GET /v1/trainings/{id}/sample`). The image generation
-    screen now has a **Trained LoRA** dropdown in Advanced Options that sends
-    `ImageRequest.training_id` (completed jobs only). The mobile port must mirror this
-    handling, including the `samplePath`/`artifactPath` helpers and the FormData
-    multipart support added to the web `api-client.ts`.
-
 ### Research job provider/model now resolved (R4)
 
 `POST /v1/research` no longer stores `provider: "auto"` / `model: "auto"` on the job: the
@@ -217,9 +164,6 @@ Small backend auth-pass with two contract notes:
   aspect-ratio grid already goes through `imageApi.aspectRatios()`, so no code change was
   needed. The mobile port must keep sending the token on this call (it already does via the
   ported `api-endpoints.ts`).
-- **`GET /v1/trainings/{id}` no longer includes `dataset_dir`** in the detail response
-  (the absolute server path was leaking). **SPA type updated:** `dataset_dir` was removed
-  from `TrainingJobDetail` in `frontend/src/lib/types.ts`; no SPA code read the field.
 
 ### Auth hardening — claims + policy (audit INFO)
 
@@ -235,8 +179,8 @@ Backend audit-INFO pass with two client-visible notes:
   re-logs in a single time after the backend deploys (the 401-refresh-retry path in
   `api-client.ts` already handles this: the refresh fails → the user is sent to login).
 - **No other SPA contract changes.** The SSE event schemas for chat (`[token]` / `[DONE]` /
-  `[ERROR]`), agent (`tool_call`/`tool_result`/`token`/`error`/`done`), research
-  (`progress`/`done`/`error`), and training streams are unchanged; the new per-user stream
+  `[ERROR]`), agent (`tool_call`/`tool_result`/`token`/`error`/`done`), and research
+  (`progress`/`done`/`error`) are unchanged; the new per-user stream
   cap (429 "too many concurrent streams") only appears when one account holds
   `MAX_CONCURRENT_STREAMS` (default 4) streams at once.
 - **Login/refresh accept an optional `device_id`.** `POST /auth/login` and

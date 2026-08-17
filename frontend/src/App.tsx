@@ -13,7 +13,6 @@ import PresetsPage from "@/pages/presets";
 import ProvidersPage from "@/pages/providers";
 import TemplatesPage from "@/pages/templates";
 import WorkflowsPage from "@/pages/workflows";
-import TrainingsPage from "@/pages/trainings";
 import AgentPage from "@/pages/agent";
 import ResearchPage from "@/pages/research";
 import ModelsPage from "@/pages/models";
@@ -48,7 +47,6 @@ export default function App() {
           <Route path="/providers" element={<ProvidersPage />} />
           <Route path="/templates" element={<TemplatesPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
-          <Route path="/trainings" element={<TrainingsPage />} />
           <Route path="/agent" element={<AgentPage />} />
           <Route path="/research" element={<ResearchPage />} />
           <Route path="/models" element={<ModelsPage />} />

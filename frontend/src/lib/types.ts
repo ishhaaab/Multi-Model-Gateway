@@ -205,7 +205,6 @@ export interface ImageGenerateRequest {
   negative_prompt?: string;
   template_id?: string | null;
   workflow_id?: string | null;
-  training_id?: string | null;
   steps?: number;
   cfg?: number;
   aspect_ratio?: string;
@@ -320,47 +319,6 @@ export type ResearchEvent =
   | { type: "done"; status: "complete"; result: string; sources: ResearchSource[] }
   | { type: "done"; status: "cancelled" }
   | { type: "error"; message: string };
-
-// ───────────── LoRA Training ─────────────
-export type TrainingBaseModel = "flux-dev" | "sdxl" | "sd1";
-
-export type TrainingStatus =
-  | "queued"
-  | "running"
-  | "complete"
-  | "failed"
-  | "cancelled";
-
-// List item (GET /v1/trainings)
-export interface TrainingJob {
-  id: string;
-  name: string;
-  base_model: TrainingBaseModel;
-  status: TrainingStatus;
-  stage: string | null;
-  progress: number;
-  created_at: string;
-  artifact_filename?: string | null;
-  sample_image?: string | null;
-  error?: string | null;
-}
-
-// Full job (GET /v1/trainings/{id}) — dataset_dir was removed from the detail
-// response (server path leak; the SPA never used it).
-export interface TrainingJobDetail extends TrainingJob {
-  params: { steps: number; learning_rate: number; resolution: number };
-}
-
-export interface TrainingCreateResponse {
-  job_id: string;
-  status: string;
-}
-
-// SSE events from GET /v1/trainings/{id}/stream.
-export type TrainingEvent =
-  | { type: "progress"; stage?: string | null; progress?: number; message?: string }
-  | { type: "done"; status?: string; artifact_filename?: string }
-  | { type: "error"; message?: string };
 
 // ───────────── Cookbook / Hardware ─────────────
 export interface GpuInfo {

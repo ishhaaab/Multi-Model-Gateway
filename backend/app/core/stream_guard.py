@@ -1,6 +1,6 @@
 """Per-user cap on open SSE streams.
 
-The chat/agent/research/training stream endpoints hold an HTTP connection open
+The chat/agent/research stream endpoints hold an HTTP connection open
 for the whole generation, so one client can pin many connections for free.
 This module keeps a per-user in-memory count of open streams and refuses new
 ones past settings.MAX_CONCURRENT_STREAMS with a 429. In-memory is enough: the

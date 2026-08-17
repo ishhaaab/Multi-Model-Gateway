@@ -165,8 +165,7 @@ CR-17/18/19/20/21/22/23.
   guess if >1 match; require `param_map` for ambiguous anchors. Error at workflow upload.
 - **Status: DONE** — `validate_workflow_anchors` rejects ambiguous workflows at upload/update
   (422) unless `param_map` pins the intended node; `inject_params` auto-detects with exact
-  matching and skips (never guesses) when an anchor is missing or ambiguous; `inject_lora`
-  anchors only on an exact `KSampler` (a KSamplerAdvanced-only graph gets no LoRA). See
+  matching and skips (never guesses) when an anchor is missing or ambiguous. See
   "Reliability fixes implemented (R3–R6)" below.
 
 #### R6 — DuckDuckGo scraper fails silently to empty · MEDIUM (CR-16)
@@ -372,67 +371,6 @@ Implemented:
 Not in this phase (later): routing against these providers in `services/router.py`, chat/
 agent wiring, per-provider param translation beyond what the adapters do.
 
-## Phase 6 — image LoRA training (in progress)
-
-Users can fine-tune image LoRAs from a zip of images and use the result on image
-generation, all through the API — no manual ai-toolkit runs.
-
-Implemented:
-
-- **`trainings` table** (`models/trainings.py`, migration `d4a8b2c6f9e7`) — user-owned rows
-  with name, `base_model` (`flux-dev | sdxl | sd1`), `dataset_dir` (inside the shared
-  `training_data` volume), `artifact_filename` (the produced `.safetensors`), status
-  (`queued|running|complete|failed|cancelled`), stage, 0-100 progress, JSONB params
-  (steps, learning_rate), error, `sample_image`. FK to users is `ON DELETE CASCADE`.
-- **Training CRUD + streaming** (`routers/trainings.py`, mounted at `/v1/trainings`) —
-  `POST /trainings` (multipart: name, base_model, dataset zip with a 2 GB cap, steps,
-  learning_rate; validates ≥3 images; safe flat zip extraction that rejects traversal
-  and `__MACOSX` junk), `GET /trainings` + `GET /trainings/{id}` (404 for missing AND
-  foreign rows — job ids can't be enumerated), `POST /trainings/{id}/cancel`, `GET
-  /trainings/{id}/stream` (SSE `{"type":"progress"|"done"|"error"}` relayed from Redis
-  pub/sub channel `train:{id}`), and `GET /trainings/{id}/artifact` (downloads the
-  `.safetensors`, traversal-guarded).
-- **Authed sample-image endpoint** — `GET /trainings/{id}/sample` mirrors the artifact
-  route: owned-job check (404 for missing/foreign), 404 unless `status == "complete"`
-  and `sample_image` is set, traversal-guarded resolve under the job dir, and a
-  `FileResponse` (media type guessed from the extension). The web SPA renders it via
-  the authed blob-fetch pattern.
-- **Trainer arq worker** (`app/trainer_worker.py` + `services/trainer.py`) — a dedicated
-  compose service (`trainer`) built from the `trainer` Dockerfile target, which clones
-  ai-toolkit into `/opt/ai-toolkit` and runs `python /opt/ai-toolkit/run.py <config.yaml>`.
-  One GPU job at a time (`max_jobs = 1`), `TRAINING_JOB_TIMEOUT_SECONDS` wall-clock cap.
-  Progress is published to Redis pub/sub as the run progresses and the job row is updated
-  at each stage so polling works and state survives worker restarts.
-- **ai-toolkit specifics** — config uses the current `job: extension` shape with a
-  `config:` wrapper (older `job: train` flat shape is gone upstream); FLUX.1-dev is a
-  gated model so `HF_TOKEN` in `.env` is required for `base_model=flux-dev`; torch is
-  pinned to the repo's CUDA 13.0 build (`torch==2.13.0 … --index-url …/whl/cu130` in the
-  trainer Dockerfile); tqdm progress is parsed from `\r`-delimited chunks (a `\n`-only
-  reader would starve); captions are optional — ai-toolkit falls back to an empty caption
-  when `{image}.txt` is missing, so datasets may ride along their own `.txt` files.
-- **base_model extension pattern** — `base_model` supports `flux-dev | sdxl | sd1`. The
-  sd1/sdxl branches point `name_or_path` at local checkpoints mounted from
-  `SD1_MODEL_PATH`/`SDXL_MODEL_PATH` (see `core/config.py`) instead of downloading the HF
-  default; sd1 leaves `is_xl: false` so ai-toolkit uses its default sd1 arch. 6GB-VRAM
-  tuning for sd1/sdxl: `cache_latents_to_disk`, `ema_config.use_ema: false`, batch 1,
-  grad accum 1, gradient checkpointing, frozen TE, 512px. Adding another family = add it
-  to the `base_model` Literal in `routers/trainings.py` + a `_build_config` branch in
-  `services/trainer.py` + `*_MODEL_PATH`/`*_MODEL_NAME` settings + a compose mount
-  (documented in the `trainer.py` module docstring).
-- **LoRA injection on generation** — `POST /v1/images/generate` now accepts
-  `training_id`. The handler copies the completed artifact into the ComfyUI LoRA folder
-  (`COMFY_LORA_DIR`, mounted into the backend container as `/comfy-loras`) as
-  `lora_{job.id}.safetensors`, then `services/comfy.py::inject_lora` splices a
-  `LoraLoader` node into the workflow between the checkpoint loader and the sampler /
-  CLIPTextEncode nodes. Injection is best-effort: a workflow that already has a
-  `LoraLoader`, or an unparseable KSampler link, is left unchanged (warning logged) so
-  generation never breaks. `COMFY_LORA_DIR` unset → 400; missing/foreign job → 404;
-  unfinished job → 409. The response gains a `"lora"` field naming the loaded file.
-
-Not in this phase (later): dataset management (delete/replace uploads), per-job trigger
-words / caption editing, hyperparameter tuning beyond steps + learning rate, and
-publishing trained LoRAs back to ComfyUI's own model browser.
-
 ## Security fixes implemented (S2 + S3)
 
 The two tailnet-exposure fixes from Phase 1, landed together.
@@ -563,8 +501,6 @@ The Phase 2 reliability follow-ups (CR-10/14/15/16), landed together.
     (`KSampler` equality, `ResolutionSelector` equality, `endswith("LatentImage")`); 0 or >1
     matches means that param is left unset unless `param_map` overrides it — no guessing.
     `param_map` priority is unchanged (applied after auto-detect).
-  - `inject_lora` anchors on an exact `KSampler` only — a KSamplerAdvanced-only graph logs
-    and skips instead of getting a silent LoRA splice.
   - `routers/workflows.py` create + update call `validate_workflow_anchors` and translate
     `ValueError` → `HTTPException(422, str(e))`.
 - **R6 — search degradation is surfaced.**
@@ -576,8 +512,7 @@ The Phase 2 reliability follow-ups (CR-10/14/15/16), landed together.
     of pretending it found nothing.
 - **Tests:** `backend/tests/test_comfy.py` grows 8 cases: base workflow passes validation;
   KSampler + KSamplerAdvanced raises without `param_map` and passes with it; multiple latent
-  nodes raise; `inject_params` leaves `batch_size` unset on ambiguous latent graphs; a
-  KSamplerAdvanced-only graph gets no LoRA injection; `param_map` still beats auto-detect.
+  nodes raise; `inject_params` leaves `batch_size` unset on ambiguous latent graphs; `param_map` still beats auto-detect.
 
 ## Data integrity fixes implemented (D4 + R7)
 
@@ -625,10 +560,6 @@ A defensive pass over the auth/API surface, landed together.
   `{"ok": false, "error": "provider test failed"}` instead of leaking the raw exception
   string (URLs, key fragments, SDK tracebacks) to the client. The `{ok, model}` success
   path and the `"no default model set"` result are unchanged.
-- **Trainings detail no longer leaks `dataset_dir`.** `GET /v1/trainings/{id}` drops the
-  absolute server path from the response; the summary shape (`id`, `name`, `base_model`,
-  `status`, `stage`, `progress`, `created_at`, `artifact_filename`, `sample_image`,
-  `error`) plus `params` is unchanged.
 - **JWTs carry `iat`.** Both `create_access_token` and `create_refresh_token` add
   `"iat": int(time.time())` to the payload.
 
@@ -683,13 +614,10 @@ Audit INFO items, landed together.
   `StreamingResponse` is created (a 429 "too many concurrent streams" is a real HTTP
   response, not an in-stream SSE error); `release_stream_slot(user_id)` runs in each
   generator's `finally` (fires on normal completion, error, and client disconnect). Wired
-  into `/v1/chat/completions`, `/v1/agent/chat`, `/v1/research/{id}/stream`, and
-  `/v1/trainings/{id}/stream`. In-memory is correct because the backend is a single
+  into `/v1/chat/completions`, `/v1/agent/chat`, and `/v1/research/{id}/stream`. In-memory is correct because the backend is a single
   container; a horizontally-scaled deployment would need a shared counter. Acquire/release
-  stays 1:1 even when the stream never starts: `stream_training` wraps every step between
-  the acquire and the `StreamingResponse` (Redis pubsub setup + ownership check) in
-  `try/except BaseException` that closes any created pubsub and releases the slot before
-  re-raising; `stream_research` wraps its ownership check the same way (its pubsub setup
+  stays 1:1 even when the stream never starts: stream handlers wrap their ownership checks in
+  `try/except BaseException` that releases the slot before re-raising (pubsub setup
   lives inside the generator, already covered by the relay `finally`).
 - **Langfuse content documentation.** `README.md` notes that full chat content is sent to
   Langfuse unless a message is sent with `private: true` (metadata-only), and that
@@ -786,9 +714,8 @@ return strings — never raise, so the agent run survives.
   workflow) and `batch_size=1`. Args: `prompt` (1–4000), `negative_prompt` (default
   `"text, watermark, blurry, low quality"`), `steps` (1–50, default 10), `cfg` (0–20,
   default 1.2), `aspect_ratio` (validated against `ASPECT_RATIOS`; a mismatch returns an
-  error listing the valid options), `seed` (optional), `training_id` (optional —
-  schema-only for now; LoRA resolution stays in the images router's
-  `_prepare_training_lora`).
+  error listing the valid options), `seed` (optional);
+
   - **Ownership registration:** after submission the handler sets
     `imgjob:{prompt_id} → user_id` (TTL 1h) — the same key the images router uses — so
     the user can poll `/v1/images/status/{prompt_id}` and fetch the result.

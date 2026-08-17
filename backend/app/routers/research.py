@@ -144,7 +144,7 @@ async def stream_research(
     user_id: str = Depends(get_current_user),
 ):
     await acquire_stream_slot(user_id)
-    # Defensive symmetry with trainings.py: the only setup between the slot
+    # The only setup between the slot
     # acquire and the StreamingResponse is this ownership check (an await that
     # can raise on DB errors or task cancellation). The redis/pubsub wiring
     # lives inside the relay generator, whose finally already releases the slot
