@@ -10,6 +10,23 @@ export interface AgentStep {
   name: string;
   arguments?: string; // present from tool_call
   content?: string; // present once tool_result arrives
+  edit_id?: string; // extracted from file-tool results (ok {edit_id})
+}
+
+function extractEditId(content: string): string | undefined {
+  try {
+    const obj = JSON.parse(content);
+    if (obj && typeof obj === "object" && typeof (obj as Record<string, unknown>).edit_id === "string") {
+      return (obj as Record<string, string>).edit_id;
+    }
+  } catch {
+    // not JSON — fall back to "ok <id>" prefix
+  }
+  if (content.startsWith("ok ")) {
+    const id = content.slice(3).trim().split(/\s+/)[0];
+    if (id) return id;
+  }
+  return undefined;
 }
 
 export interface AgentTurn {
@@ -69,11 +86,12 @@ export function useAgent() {
               steps: [...turn.steps, { id: ev.id, name: ev.name, arguments: ev.arguments }],
             }));
           } else if (ev.type === "tool_result") {
+            const edit_id = ev.content ? extractEditId(ev.content) : undefined;
             patchLast((turn) => ({
               ...turn,
               steps: turn.steps.some((s) => s.id === ev.id)
-                ? turn.steps.map((s) => (s.id === ev.id ? { ...s, content: ev.content } : s))
-                : [...turn.steps, { id: ev.id, name: ev.name, content: ev.content }],
+                ? turn.steps.map((s) => (s.id === ev.id ? { ...s, content: ev.content, edit_id: edit_id ?? s.edit_id } : s))
+                : [...turn.steps, { id: ev.id, name: ev.name, content: ev.content, edit_id }],
             }));
           } else if (ev.type === "token") {
             patchLast((turn) => ({ ...turn, answer: turn.answer + ev.content }));

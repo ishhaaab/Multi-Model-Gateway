@@ -165,6 +165,47 @@ Small backend auth-pass with two contract notes:
   needed. The mobile port must keep sending the token on this call (it already does via the
   ported `api-endpoints.ts`).
 
+### Workspace + File edits + Undo (T3 — Agents)
+
+Per-user-per-agent git-backed workspace on the named volume `workspaces:/workspaces`
+at `workspaces/{user_id}/{agent_id}` (ADR-0002). File tools (`list_files`, `read_file`,
+`write_file`, `edit_patch`, `edit_lines`) + `bash` (ADR-0003) operate only inside the
+workspace; out-of-workspace paths and absolute paths are 422. `edit_lines`/`write_file`/`edit_patch`
+take per-line sha1 hashes from `read_file` (field `lines:[{n, hash, text}]`); a stale
+hash is `409 file changed, re-read` (same contract as `memory_files` `if_version`).
+Quotas `SANDBOX_DISK_QUOTA_MB` / `SANDBOX_EXEC_TIMEOUT` enforced in the backend; deny-by-default
+for file/bash tools via `tool_permissions` + master `ENABLE_CODE_EXECUTION` switch (ADR-0002 Q8).
+
+New backend contract (all `GET`/`POST …/workspace/*` require `Authorization: Bearer` and
+owner-or-installer on the agent; `DELETE …/install` removes the installer's pointer only):
+
+- `GET /v1/agents/{id}/workspace/files?path=.` → `{files: string[]}` via `WorkspaceStore.list_files`.
+- `GET /v1/agents/{id}/workspace/file?path=...` → `{content, lines:[{n, hash, text}]}` via `read_file`.
+- `GET /v1/agents/{id}/workspace/edits?limit=&offset=` → `{data: FileEdit[]}` where `FileEdit`
+  is `{id, user_id, agent_id, store, path, patch, before_hash, after_hash, tool_call_id, created_at}`.
+- `POST /v1/agents/{id}/workspace/undo {edit_id}` → `{edit_id: newId, undone: editId}`; 404 when
+  the edit doesn't exist and 403 when `file_edits.user_id != caller` (per-running-user
+  isolation — you can't undo another user's workspace). Undo is `git revert` of the commit
+  that mentions the original `edit_id` plus a new audit row.
+- Tool `tool_result` content for `write_file`/`edit_patch`/`edit_lines` is
+  `{"edit_id", "path"}` (JSON, stringified in the SSE `tool_result.content` field). Client
+  should `JSON.parse(ev.content)?.edit_id` or fall back to an `"ok <edit_id>"` prefix to
+  link a `ToolStepCard` to the history entry; `ToolStepCard` renders `DiffView` for these
+  tools when `patch` is present, otherwise the raw JSON. The agent SSE schema is unchanged
+  (one JSON object per `data:` line: `tool_call`/`tool_result`/`token`/`error`/`done`).
+
+Frontend notes (web SPA — DONE in this slice; mobile must mirror):
+
+- `frontend/src/lib/api-endpoints.ts:248` `workspaceApi.files/file/edits/undo`.
+- `frontend/src/stores/workspace-store.ts:1` `useWorkspaceStore {files, edits, fetchFiles, fetchEdits, fetchAll, undo}`.
+- `frontend/src/components/agent/DiffView.tsx:1` green/red unified-diff renderer.
+- `frontend/src/components/agent/HistoryTimeline.tsx:1` `file_edits → [Undo]` (calls `workspace-store.undo`).
+- `frontend/src/components/agent/WorkspacePanel.tsx:1` file browser + file viewer + history (backed by `workspace-store`).
+- `/agent` route: `components/layout/RightSidebar.tsx:39` exposes Tools | Workspace tabs when
+  `kind === "agent"`; `hooks/use-agent.ts:8` extends `AgentStep` with `edit_id?: string`
+  (extracted from every `tool_result` via `JSON.parse(...).edit_id` or `"ok "` prefix) for the
+  card↔history link.
+
 ### Auth hardening — claims + policy (audit INFO)
 
 Backend audit-INFO pass with two client-visible notes:

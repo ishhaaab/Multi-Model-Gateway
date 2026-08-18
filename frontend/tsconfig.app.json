@@ -26,5 +26,6 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
+  "exclude": ["src/lib/api-client.test.ts"],
   "include": ["src"]
 }

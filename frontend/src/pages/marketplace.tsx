@@ -1,7 +1,6 @@
 import { useEffect } from "react";
-import { Store, Download, Upload, Globe } from "lucide-react";
+import { Store, Download, Globe } from "lucide-react";
 import { marketplaceApi } from "@/lib/api-endpoints";
-import { useAgentCatalogStore } from "@/stores/agent-catalog-store";
 import { toast } from "@/stores/ui-store";
 import { ApiError } from "@/lib/api-client";
 import { Button } from "@/components/ui/Button";

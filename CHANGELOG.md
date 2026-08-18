@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-13 — Agents T3 wiring: workspace panel + undo UI
+
+- Frontend: finished T3-004 — `WorkspacePanel` now backed by `workspace-store` (`files/edits/fetchAll/undo`), `HistoryTimeline` (edits → Undo), `RightSidebar` Tools | Workspace tabs on `/agent`, `use-agent` extracts `edit_id` from every file-tool `tool_result` into `AgentStep.edit_id`; `DiffView` for file edits in `ToolStepCard` unchanged.
+- Docs: `frontend-roadmap.md` "Workspace + File edits + Undo (T3)" contract section (endpoints + `FileEdit` shape + frontend notes).
+- Fix: `WorkspacePanel` Button/Skeleton imports (`components\ui` → `components/ui`), `marketplace.tsx` unused `Upload`/`useAgentCatalogStore` imports, `tsconfig.app.json` excludes `api-client.test.ts` (`vitest` not in prod deps) so `npm run build` passes.
+
 ## 2026-08-13 — Fit scoring: total VRAM + RAM offload; hardware chip
 
 - Backend: fit verdicts (local cookbook + HF browser) now score against TOTAL VRAM and factor RAM offload instead of free VRAM; `/v1/hardware` adds `ram_total_mb`. Frontend: the Models window hardware chip moved to the top tab bar showing "name · total VRAM · total RAM" (no free-VRAM metric / usage bar).

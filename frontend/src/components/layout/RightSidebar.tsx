@@ -19,6 +19,7 @@ import { PresetPanel } from "@/components/settings/PresetPanel";
 import { TemplatePanel } from "@/components/settings/TemplatePanel";
 import { WorkflowPanel } from "@/components/settings/WorkflowPanel";
 import { AgentToolsPanel } from "@/components/settings/AgentToolsPanel";
+import { WorkspacePanel } from "@/components/agent/WorkspacePanel";
 
 type Kind = "chat" | "images" | "agent";
 type ImageTab = "templates" | "workflows";
@@ -47,6 +48,9 @@ export function RightSidebar() {
   const isMobile = useIsMobile();
   const asideRef = useRef<HTMLElement>(null);
   const [imageTab, setImageTab] = useState<ImageTab>("workflows");
+  // Agent panel: Tools vs Workspace. Persists within the `/agent` route session.
+  type AgentTab = "tools" | "workspace";
+  const [agentTab, setAgentTab] = useState<AgentTab>("tools");
 
   // The panel only exists for chat/image routes (settings etc. have none).
   if (!kind) return null;
@@ -146,9 +150,26 @@ export function RightSidebar() {
           isMobile ? "fixed inset-y-0 right-0 z-40 shadow-2xl" : "relative"
         )}
       >
-      {/* Header — a title for chat, a Templates|Workflows toggle for images */}
+      {/* Header — chat title, agent Tools|Workspace toggle, or image Templates|Workflows toggle */}
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-        {kind === "images" ? (
+        {kind === "agent" ? (
+          <div className="flex gap-1 rounded-lg border border-border bg-bg-primary/40 p-0.5">
+            {(["tools", "workspace"] as const).map((id) => (
+              <button
+                key={id}
+                onClick={() => setAgentTab(id)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-[0.8125rem] font-medium capitalize transition-colors",
+                  agentTab === id
+                    ? "bg-bg-elevated text-text-primary shadow-[0_1px_3px_rgba(0,0,0,0.35)]"
+                    : "text-text-secondary hover:text-text-primary"
+                )}
+              >
+                {id}
+              </button>
+            ))}
+          </div>
+        ) : kind === "images" ? (
           <div className="flex gap-1 rounded-lg border border-border bg-bg-primary/40 p-0.5">
             {IMAGE_TABS.map(({ id, label, icon: TabIcon }) => (
               <button
@@ -187,7 +208,11 @@ export function RightSidebar() {
         {kind === "chat" ? (
           <PresetPanel />
         ) : kind === "agent" ? (
-          <AgentToolsPanel />
+          agentTab === "workspace" ? (
+            <WorkspacePanel />
+          ) : (
+            <AgentToolsPanel />
+          )
         ) : imageTab === "templates" ? (
           <TemplatePanel />
         ) : (

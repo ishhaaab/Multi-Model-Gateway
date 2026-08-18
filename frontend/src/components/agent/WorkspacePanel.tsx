@@ -1,48 +1,41 @@
 import { useEffect, useState } from "react";
-import { Folder, FileText, RotateCcw, RefreshCw } from "lucide-react";
+import { Folder, FileText, RefreshCw } from "lucide-react";
 import { workspaceApi } from "@/lib/api-endpoints";
 import { useAgentCatalogStore } from "@/stores/agent-catalog-store";
+import { useWorkspaceStore } from "@/stores/workspace-store";
 import { toast } from "@/stores/ui-store";
 import { ApiError } from "@/lib/api-client";
-import type { FileEdit } from "@/lib/types";
-import { DiffView } from "@/components/agent/DiffView";
-import { Button } from "@/components\ui\Button";
-import { Skeleton } from "@/components\ui\Skeleton";
+import { HistoryTimeline } from "@/components/agent/HistoryTimeline";
+import { Button } from "@/components/ui/Button";
+import { Skeleton } from "@/components/ui/Skeleton";
 
 export function WorkspacePanel() {
   const selectedId = useAgentCatalogStore((s) => s.selectedId);
-  const [files, setFiles] = useState<string[]>([]);
-  const [edits, setEdits] = useState<FileEdit[]>([]);
-  const [loading, setLoading] = useState(false);
+  const files = useWorkspaceStore((s) => s.files);
+  const edits = useWorkspaceStore((s) => s.edits);
+  const isLoading = useWorkspaceStore((s) => s.isLoading);
+  const fetchAll = useWorkspaceStore((s) => s.fetchAll);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
 
-  const load = async () => {
-    if (!selectedId) return;
-    setLoading(true);
-    try {
-      const [f, e] = await Promise.all([
-        workspaceApi.files(selectedId),
-        workspaceApi.edits(selectedId, { limit: 20 }),
-      ]);
-      setFiles(f.files);
-      setEdits(e.data);
-    } catch (err) {
+  useEffect(() => {
+    setSelectedFile(null);
+    setFileContent(null);
+    if (selectedId) void fetchAll(selectedId).catch((err: unknown) => {
       if ((err as ApiError)?.statusCode !== 404) {
         toast.error(err instanceof ApiError ? err.detail : "Could not load workspace.");
       }
-    } finally {
-      setLoading(false);
-    }
-  };
+    });
+  }, [selectedId, fetchAll]);
 
-  useEffect(() => {
-    setFiles([]);
-    setEdits([]);
-    setSelectedFile(null);
-    setFileContent(null);
-    if (selectedId) void load();
-  }, [selectedId]);
+  const reload = () => {
+    if (!selectedId) return;
+    void fetchAll(selectedId).catch((err: unknown) => {
+      if ((err as ApiError)?.statusCode !== 404) {
+        toast.error(err instanceof ApiError ? err.detail : "Could not load workspace.");
+      }
+    });
+  };
 
   const openFile = async (path: string) => {
     if (!selectedId) return;
@@ -55,17 +48,6 @@ export function WorkspacePanel() {
     }
   };
 
-  const undo = async (editId: string) => {
-    if (!selectedId) return;
-    try {
-      await workspaceApi.undo(selectedId, editId);
-      toast.success("Undone.");
-      void load();
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.detail : "Undo failed.");
-    }
-  };
-
   if (!selectedId) {
     return <p className="p-4 text-center text-sm text-text-muted">Select an agent to view its workspace.</p>;
   }
@@ -74,7 +56,7 @@ export function WorkspacePanel() {
     <div className="flex flex-col gap-4 p-3">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium uppercase tracking-wide text-text-muted">Workspace</span>
-        <Button variant="ghost" size="sm" leftIcon={<RefreshCw size={13} />} onClick={load} isLoading={loading}>
+        <Button variant="ghost" size="sm" leftIcon={<RefreshCw size={13} />} onClick={reload} isLoading={isLoading}>
           Refresh
         </Button>
       </div>
@@ -84,7 +66,7 @@ export function WorkspacePanel() {
         <p className="mb-1 flex items-center gap-1 text-[0.7rem] font-medium uppercase tracking-wide text-text-muted">
           <Folder size={12} /> Files
         </p>
-        {loading && files.length === 0 ? (
+        {isLoading && files.length === 0 ? (
           <Skeleton className="h-10 w-full" />
         ) : files.length === 0 ? (
           <p className="text-xs text-text-muted">No files yet.</p>
@@ -113,26 +95,7 @@ export function WorkspacePanel() {
       {/* History timeline */}
       <div>
         <p className="mb-1 text-[0.7rem] font-medium uppercase tracking-wide text-text-muted">History</p>
-        {edits.length === 0 ? (
-          <p className="text-xs text-text-muted">No edits yet.</p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {edits.map((e) => (
-              <div key={e.id} className="rounded border border-border bg-bg-secondary/40 p-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-mono text-xs text-text-primary">{e.path}</span>
-                  <Button variant="ghost" size="sm" leftIcon={<RotateCcw size={12} />} onClick={() => undo(e.id)}>
-                    Undo
-                  </Button>
-                </div>
-                <p className="text-[0.65rem] text-text-muted">{new Date(e.created_at).toLocaleString()} · {e.store}</p>
-                <div className="mt-1">
-                  <DiffView patch={e.patch} />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        <HistoryTimeline agentId={selectedId} edits={edits} />
       </div>
     </div>
   );
