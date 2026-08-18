@@ -4,29 +4,14 @@ import { useAgentCatalogStore } from "@/stores/agent-catalog-store";
 import { agentApi } from "@/lib/api-endpoints";
 import { ApiError } from "@/lib/api-client";
 import type { AgentEvent, ChatRequest } from "@/lib/types";
+import { extractEditId } from "@/lib/agent-events";
 
 export interface AgentStep {
   id: string;
   name: string;
   arguments?: string; // present from tool_call
   content?: string; // present once tool_result arrives
-  edit_id?: string; // extracted from file-tool results (ok {edit_id})
-}
-
-function extractEditId(content: string): string | undefined {
-  try {
-    const obj = JSON.parse(content);
-    if (obj && typeof obj === "object" && typeof (obj as Record<string, unknown>).edit_id === "string") {
-      return (obj as Record<string, string>).edit_id;
-    }
-  } catch {
-    // not JSON — fall back to "ok <id>" prefix
-  }
-  if (content.startsWith("ok ")) {
-    const id = content.slice(3).trim().split(/\s+/)[0];
-    if (id) return id;
-  }
-  return undefined;
+  edit_id?: string; // extracted from file-tool results ({edit_id, path})
 }
 
 export interface AgentTurn {

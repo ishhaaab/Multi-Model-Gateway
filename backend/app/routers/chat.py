@@ -19,7 +19,8 @@ from app.services.convo import conversation, load_history, save_messages, get_la
 from app.services.memory import store_exchange_memories
 from app.services.memory_curation import enqueue_curation
 from app.services.memory_files import safe_build_memory_context
-from app.services.router import get_provider, ChatRequest
+from app.services.router import ChatRequest
+from app.services.provider_router import ProviderRouter
 from app.services.tokenize import sync_local_token_counts
 
 from app.models.presets import (
@@ -100,16 +101,15 @@ async def _stream_tokens_inner(request: ChatRequest, user_id: str, db: AsyncSess
         messages = [{"role": "system", "content": memory_context}] + messages
 
     try:
-        provider, model, role = await get_provider(request, user_id, db)
+        resolved = await ProviderRouter().resolve(request, user_id, db)
+        provider, model = resolved.provider, resolved.model
     except AppError as exc:
-        # headers are already sent at this point, so the global AppError handler
-        # can't translate the error — surface it as an SSE [ERROR] event instead
         logger.error("Provider resolution failed: %s", exc.detail)
         yield f"data: [ERROR] {exc.detail}\n\n"
         yield "data: [DONE]\n\n"
         return
-    is_cloud = provider.is_cloud
-    resolved_provider = "openrouter" if is_cloud else "local"  # CR-6: log the resolved provider, not "auto"
+    is_cloud = getattr(provider, "is_cloud", False)
+    resolved_provider = "openrouter" if is_cloud else "local"
 
     # Release the DB connection back to the pool BEFORE the (up-to-minute) stream —
     # all reads are done, and holding an idle connection across the stream is what

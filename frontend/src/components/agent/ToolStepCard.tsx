@@ -3,6 +3,7 @@ import { ChevronDown, Wrench, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentStep } from "@/hooks/use-agent";
 import { DiffView } from "@/components/agent/DiffView";
+import { parseFileEditResult, shouldRenderDiff } from "@/lib/agent-events";
 
 function prettyJson(raw: string | undefined): string {
   if (!raw) return "";
@@ -13,26 +14,8 @@ function prettyJson(raw: string | undefined): string {
   }
 }
 
-function tryParseJson(raw: string): unknown | null {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function isFileEdit(name: string, content: string): boolean {
-  if (!["edit_patch", "edit_lines", "write_file"].includes(name)) return false;
-  const obj = tryParseJson(content);
-  return !!obj && typeof obj === "object" && "edit_id" in (obj as Record<string, unknown>);
-}
-
 function extractPatch(content: string): string | null {
-  const obj = tryParseJson(content);
-  if (obj && typeof obj === "object" && typeof (obj as Record<string, unknown>).patch === "string") {
-    return (obj as Record<string, string>).patch;
-  }
-  return null;
+  return parseFileEditResult(content)?.patch ?? null;
 }
 
 /** Collapsible inline card for one agent tool step (call + result). */
@@ -74,7 +57,7 @@ export function ToolStepCard({ step }: { step: AgentStep }) {
           {step.content !== undefined && (
             <div>
               <p className="mb-1 text-[0.7rem] uppercase tracking-wide text-text-muted">Result</p>
-              {isFileEdit(step.name, step.content) ? (
+              {shouldRenderDiff(step.name, step.content) ? (
                 <DiffView patch={extractPatch(step.content) ?? step.content} />
               ) : (
                 <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-bg-primary p-2 font-mono text-[0.75rem] leading-relaxed text-text-secondary">

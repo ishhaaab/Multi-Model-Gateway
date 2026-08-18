@@ -138,12 +138,13 @@ def _fallback_provider(
 
 
 async def get_provider(request: ChatRequest, user_id: str, db: AsyncSession) -> Tuple[LLMProvider, str, str]:
-    """Resolve (provider adapter, model, role) for a chat/agent request."""
-    pinned = await _resolve_pinned_provider(request, user_id, db)
-    if pinned is not None:
-        return pinned
-    role = resolve_role(request)
-    via_default = await _resolve_default_provider_for_role(request, user_id, role, db)
-    if via_default is not None:
-        return via_default
-    return _fallback_provider(request, role)
+    """Resolve (provider adapter, model, role) for a chat/agent request.
+
+    Delegates to ProviderRouter (#3) — the legacy chain is preserved here as a
+    thin shim for callers that still import from this module. New code should
+    import from app.services.provider_router.
+    """
+    from app.services.provider_router import ProviderRouter
+
+    r = await ProviderRouter().resolve(request, user_id, db)
+    return r.provider, r.model, r.role
