@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Bot, AlertTriangle, Plus } from "lucide-react";
 import { useAgent } from "@/hooks/use-agent";
+import { useAgentCatalogStore } from "@/stores/agent-catalog-store";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ToolStepCard } from "@/components/agent/ToolStepCard";
@@ -9,6 +10,7 @@ import { Button } from "@/components/ui/Button";
 
 export default function AgentPage() {
   const { turns, isStreaming, error, send, cancel, reset } = useAgent();
+  const { agents, selectedId, select } = useAgentCatalogStore();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -24,6 +26,20 @@ export default function AgentPage() {
           <Bot size={18} className="text-accent-primary" />
           <span className="text-base text-text-primary">Agent</span>
           <span className="hidden text-[0.8125rem] text-text-muted sm:inline">· tool-using assistant</span>
+          {agents.length > 0 && (
+            <select
+              value={selectedId ?? ""}
+              onChange={(e) => select(e.target.value || null)}
+              className="ml-2 rounded border border-border bg-bg-primary px-2 py-1 text-xs text-text-primary"
+            >
+              <option value="">General</option>
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} v{a.version}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         {!empty && (
           <Button variant="ghost" size="sm" leftIcon={<Plus size={15} />} onClick={reset}>
