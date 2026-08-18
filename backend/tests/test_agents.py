@@ -5,7 +5,7 @@ mocks for the policy logic, and skips cleanly when required settings are missing
 """
 
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 
 class AgentModelsTests(unittest.TestCase):

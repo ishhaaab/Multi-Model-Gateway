@@ -393,7 +393,7 @@ class ApiClient {
         /* already released */
       }
     }
-  }  }
+  }
 }
 
 export const apiClient = new ApiClient({
