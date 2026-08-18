@@ -23,4 +23,5 @@ class FileEdit(Base):
     before_hash = Column(String(40), nullable=True)
     after_hash = Column(String(40), nullable=True)
     tool_call_id = Column(String(64), nullable=True)
+    commit_sha = Column(String(40), nullable=True)  # git commit that holds this edit (deterministic undo; NULL for old rows)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

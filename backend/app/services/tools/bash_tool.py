@@ -4,6 +4,7 @@ import json
 
 from app.services.sandbox.factory import get_sandbox
 from app.services.tools.registry import Tool, ToolContext, register
+from app.services.workspace.store import get_workspace_store
 
 
 async def _bash(args: dict, ctx: ToolContext) -> str:
@@ -16,8 +17,11 @@ async def _bash(args: dict, ctx: ToolContext) -> str:
     if len(str(cmd)) > 8000:
         return "Error: command too long"
     workdir = args.get("workdir", ".") or "."
-    sandbox = get_sandbox()
-    res = await sandbox.exec(str(cmd), str(workdir), str(ctx.user_id), str(agent_id))
+    # Share the workspace lock (Q3) — bash must not interleave with file edits' git commits
+    store = get_workspace_store()
+    async with store.with_workspace_lock(str(ctx.user_id), str(agent_id)):
+        sandbox = get_sandbox()
+        res = await sandbox.exec(str(cmd), str(workdir), str(ctx.user_id), str(agent_id))
     # Return structured JSON so the model can see exit code + streams
     out = {"stdout": res.stdout, "stderr": res.stderr, "exit_code": res.exit_code}
     if res.truncated:
