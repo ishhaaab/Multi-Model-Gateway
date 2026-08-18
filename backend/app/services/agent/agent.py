@@ -243,32 +243,36 @@ async def _ensure_conversation_agent_binding(conversation_id: str, agent_id: str
 
 
 async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession):
+    """Thin adapter: resolve history/provider/tools, build AgentRuntimeCtx, stream via runtime.
+
+    No loop logic lives here — all loop/budget/prune/dispatch is inside
+    `services.agent.runtime.AgentRuntime`. This function owns DB resolution and
+    SSE framing (`_sse`) only, so routers stay thin and tests can inject a fake
+    provider without a DB.
+    """
+    from app.services.agent.runtime import AgentRuntime, AgentRuntimeCtx
+
     agent_id, agent_version, agent = await _resolve_agent(request, user_id, db)
 
     conversation_id = None
+    # `run_agent` is itself the StreamingResponse generator — it must also own
+    # stream_guard release on paths that fail *before* the runtime starts
+    # streaming (e.g. resolve_agent 404/403). Runtime owns the in-loop finally,
+    # but early errors need a local guard here.
+    # We track whether we ever entered the runtime's generator.
+    entered_runtime = False
     try:
-        # Persist agent binding on the conversation so history + memory scoping
-        # can be per-agent (stores the resolved version, not just the id).
-        if agent_id and request.conversation_id is None:
-            # New conversation — inject agent binding into the convo creation
-            # so conversation() sees it. We stash it on the request for the
-            # convo helper which reads request.agent_id (set above).
-            pass
         conversation_id = await conversation(request, user_id, db)
         await _ensure_conversation_agent_binding(conversation_id, agent_id, agent_version, agent, db)
         user_content = request.messages[-1].content
         history = await load_history(conversation_id, user_content, db)
         messages = history + [{"role": "user", "content": user_content}]
-        # Agent system_prompt wins over preset when running as an agent
         effective_system_prompt = (agent.system_prompt if agent and agent.system_prompt else None) or (
             preset.system_prompt if preset and preset.system_prompt else None
         )
         if effective_system_prompt:
             messages = [{"role": "system", "content": effective_system_prompt}] + messages
 
-        # Memory-file index injection (Tier 1 index + Tier 1.5 full files) —
-        # built BEFORE the connection is released below; best-effort, a memory
-        # failure must never fail the request. Agent-scoped when running as an agent.
         memory_context = await safe_build_memory_context(db, user_id, agent_id=agent_id)
         if memory_context:
             if effective_system_prompt:
@@ -276,189 +280,80 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
             else:
                 messages = [{"role": "system", "content": memory_context}] + messages
 
-        ctx = registry.ToolContext(user_id=user_id, conversation_id=conversation_id, db=db)
-        # Extend context with agent binding for workspace/file tools
-        ctx.agent_id = agent_id  # type: ignore[attr-defined]
+        tool_ctx = registry.ToolContext(user_id=user_id, conversation_id=conversation_id, db=db)
+        tool_ctx.agent_id = agent_id  # type: ignore[attr-defined]
         if agent_id:
             allowed = await get_allowed_tools_for_agent(agent_id, agent_version, user_id, db)
         else:
             allowed = await get_allowed_tools(user_id, db)
-        tools_by_name = {t.name: t for t in allowed}
-        tool_schemas = [registry.openai_schema(t) for t in allowed]
 
-        provider, model, role = await get_provider(request, user_id, db)
-        is_cloud = provider.is_cloud
-        resolved_provider = "openrouter" if is_cloud else "local"  # CR-6: resolved, not "auto"
-        # mirror the chat path: LM Studio takes extra sampling params via extra_body
+        provider, model, _role = await get_provider(request, user_id, db)
+        is_cloud = getattr(provider, "is_cloud", False)
+        resolved_provider = "openrouter" if is_cloud else "local"
         extra_sampling = {} if is_cloud else {
             "top_k": preset.top_k if (preset and preset.top_k is not None) else DEFAULT_TOP_K,
             "min_p": preset.min_p if preset else DEFAULT_MIN_P,
             "repeat_penalty": preset.repeat_penalty if preset and preset.repeat_penalty and preset.repeat_penalty > 0 else DEFAULT_REPEAT_PENALTY,
         }
 
-        # Release the DB connection back to the pool BEFORE the multi-round loop —
-        # every read is done, and holding an idle connection across the whole run
-        # is what exhausts the pool under concurrency (roadmap R1). Tools and the
-        # final save use their own short-lived sessions; get_db's own close()
-        # afterwards is then a no-op.
+        # R1: release the request's DB connection before streaming; runtime uses
+        # its own per-tool sessions and a fresh save session.
         await db.close()
 
-        start_time = time.time()
-        prompt_tok = 0
-        completion_tok = 0
-        final_answer = ""
-        truncated = False
-        # memory-file paths the agent wrote this turn (M2) — the curation pass
-        # skips them so it can't clobber an in-turn memory write
-        written_paths: list[str] = []
+        ctx = AgentRuntimeCtx(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            user_content=user_content,
+            messages=messages,
+            provider=provider,
+            model=model,
+            resolved_provider=resolved_provider,
+            is_cloud=is_cloud,
+            preset=preset,
+            agent_id=agent_id,
+            agent_version=agent_version,
+            agent_version_obj=agent,
+            allowed_tools=allowed,
+            tool_context=tool_ctx,
+            is_private=bool(request.private),
+            extra_sampling=extra_sampling,
+        )
 
-        # +1 lap: the last one always runs tool less so a final answer is produced
-        for iteration in range(settings.AGENT_MAX_ITERATIONS + 1):
-            over_budget = (prompt_tok + completion_tok) > settings.AGENT_TOKEN_BUDGET
-            offer_tools = bool(tool_schemas) and not over_budget and iteration < settings.AGENT_MAX_ITERATIONS
+        runtime = AgentRuntime()
+        entered_runtime = True
+        async for event in runtime.run(ctx):
+            yield _sse(event)
 
-            if offer_tools:
-                # keep the payload inside the model's context window: drop the
-                # oldest tool rounds before the call (R2)
-                _prune_old_tool_rounds(messages, int(0.6 * settings.AGENT_TOKEN_BUDGET))
-                try:
-                    resp = await provider.chat_with_tools(
-                        messages=messages,
-                        model=model,
-                        temperature=preset.temperature if preset else DEFAULT_TEMPERATURE,
-                        tools=tool_schemas,
-                        tool_choice="auto",
-                        max_tokens=None,
-                        extra_sampling=extra_sampling if not is_cloud else None,
-                    )
-                except APIError as e:
-                    if not _is_context_error(e):
-                        raise
-                    # the provider rejects the prompt as too long: drop every
-                    # tool round and synthesize from the essential prefix alone
-                    logger.warning(
-                        "context overflow mid-loop; degrading to tool-less final round: %s",
-                        repr(e),
-                    )
-                    truncated = True
-                    _prune_old_tool_rounds(messages, settings.AGENT_TOKEN_BUDGET, drop_all=True)
-                    final_answer = await provider.complete(
-                        messages=messages,
-                        model=model,
-                        temperature=preset.temperature if preset else DEFAULT_TEMPERATURE,
-                        max_tokens=None,
-                    )
-                    break
-                if resp.prompt_tokens is not None:
-                    prompt_tok += resp.prompt_tokens
-                    completion_tok += resp.completion_tokens or 0
-                tool_calls = resp.tool_calls or []
-                if not tool_calls:
-                    final_answer = resp.content or ""
-                    break
-            else:
-                _prune_old_tool_rounds(messages, settings.AGENT_TOKEN_BUDGET)
-                final_answer = await provider.complete(
-                    messages=messages,
-                    model=model,
-                    temperature=preset.temperature if preset else DEFAULT_TEMPERATURE,
-                    max_tokens=None,
-                )
-                # tools were withheld due to the iteration cap / token budget (not because
-                # the model finished) → the answer may be incomplete (issues.md CR-8)
-                truncated = bool(tool_schemas) and not offer_tools
-                break
-
-            messages.append({
-                "role": "assistant",
-                "content": resp.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.name, "arguments": tc.arguments},
-                    }
-                    for tc in tool_calls
-                ],
-            })
-
-            for tc in tool_calls:
-                name = tc.name
-                yield _sse({"type": "tool_call", "id": tc.id, "name": name,
-                            "arguments": tc.arguments})
-
-                if name in _MEMORY_WRITE_TOOLS:
-                    # best-effort: parse the args for the path the agent is
-                    # writing; a malformed payload just means no capture
-                    try:
-                        targs = json.loads(tc.arguments or "{}")
-                    except ValueError:
-                        targs = {}
-                    if isinstance(targs, dict) and targs.get("path"):
-                        written_paths.append(str(targs["path"]))
-
-                tool = tools_by_name.get(name)
-                if tool is None:
-                    # not registered, or registered but not permitted for this user
-                    result = f"Error: unknown or unauthorised tool '{name}'"
-                else:
-                    # the request session was released before the loop (R1); each
-                    # tool gets a short-lived session for its own DB work
-                    async with AsyncSessionLocal() as tool_db:
-                        ctx.db = tool_db
-                        result = await _execute_tool(tool, tc.arguments, ctx)
-
-                yield _sse({"type": "tool_result", "id": tc.id, "name": name, "content": result})
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
-
-        if final_answer:
-            yield _sse({"type": "token", "content": final_answer})
-
-        elapsed = time.time() - start_time
-        # prompt_tok accumulates only when a resp reported usage (provider
-        # exact); a local run without usage stays 0 → cumulative chunk counts
-        provenance = "exact" if prompt_tok > 0 else "chunk_count"
-        # fresh short-lived session — the request's own connection was released above (R1)
-        async with AsyncSessionLocal() as save_db:
-            await save_messages(conversation_id, user_content, final_answer, model, prompt_tok, completion_tok, save_db, token_provenance=provenance)
-        # off the response path: embeddings + tracing (metadata-only for private chats)
-        spawn(store_exchange_memories(conversation_id, user_content, final_answer))
-        spawn(asyncio.to_thread(
-            record_metrics, resolved_provider, model, elapsed, prompt_tok, completion_tok,
-            messages, final_answer, conversation_id, not request.private,
-        ))
-        # M2: background memory curation — off-path, best-effort; private chats
-        # are excluded inside enqueue_curation; paths the agent wrote this turn
-        # are passed along so the pass skips them.
-        spawn(enqueue_curation(str(user_id), str(conversation_id), written_paths,
-                               private=request.private))
-
-        done_evt: dict = {"type": "done", "conversation_id": conversation_id, "truncated": truncated}
-        if agent_id:
-            done_evt["agent_id"] = agent_id
-            done_evt["agent_version"] = agent_version if agent_version is not None else (agent.version if agent else None)
-        yield _sse(done_evt)
-
-    except APIError as e:
-        logger.error("Provider API error in agent run: %s", repr(e))
-        yield _sse({"type": "error", "message": "upstream model provider error"})
-        yield _sse({"type": "done", "conversation_id": conversation_id})
     except AppError as e:
-        # raised inside the stream, after headers are sent, so the global
-        # handler can't translate it so surface it as an SSE error event
-        yield _sse({"type": "error", "message": e.detail})
-        yield _sse({"type": "done", "conversation_id": conversation_id})
+        if not entered_runtime:
+            yield _sse({"type": "error", "message": e.detail})
+            yield _sse({"type": "done", "conversation_id": conversation_id})
+        else:
+            raise
+    except APIError as e:
+        logger.warning("Provider API error before runtime: %s", repr(e))
+        if not entered_runtime:
+            yield _sse({"type": "error", "message": "upstream model provider error"})
+            yield _sse({"type": "done", "conversation_id": conversation_id})
+        else:
+            raise
     except RuntimeError as e:
-        # e.g. chat_with_tools on a provider that doesn't support tool calling
-        # yet (Anthropic/Google) — surface the real message, not a generic 500
-        logger.error("Tool-calling error in agent run: %s", repr(e))
-        yield _sse({"type": "error", "message": str(e)})
-        yield _sse({"type": "done", "conversation_id": conversation_id})
+        logger.error("Tool setup error before runtime: %s", repr(e))
+        if not entered_runtime:
+            yield _sse({"type": "error", "message": str(e)})
+            yield _sse({"type": "done", "conversation_id": conversation_id})
+        else:
+            raise
     except Exception as e:
-        logger.error("Unexpected error in agent run: %s", repr(e))
-        yield _sse({"type": "error", "message": "internal server error"})
-        yield _sse({"type": "done", "conversation_id": conversation_id})
+        logger.error("Unexpected error before runtime: %s", repr(e))
+        if not entered_runtime:
+            yield _sse({"type": "error", "message": "internal server error"})
+            yield _sse({"type": "done", "conversation_id": conversation_id})
+        else:
+            raise
     finally:
-        # release the stream slot on every exit path — normal completion,
-        # handled errors, unhandled errors, and client disconnect
-        await release_stream_slot(user_id)
+        if not entered_runtime:
+            try:
+                await release_stream_slot(user_id)
+            except Exception:
+                pass
