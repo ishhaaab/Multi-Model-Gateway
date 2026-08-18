@@ -211,25 +211,39 @@ async def _execute_tool(tool: registry.Tool, raw_args: str, ctx: registry.ToolCo
     return result
 
 
-async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession):
-    # Resolve agent override if the client is running as an agent (ADR-0004).
-    # When agent_id is set, the agent's system_prompt and filtered allowed_tools win;
-    # otherwise the legacy global-agent path is unchanged (backward compat).
+async def _resolve_agent(request: ChatRequest, user_id: str, db: AsyncSession):
+    """Resolve agent_id/version from the request, or (None, None, None) when not running as an agent."""
     agent_id = getattr(request, "agent_id", None)
     agent_version = getattr(request, "agent_version", None)
-    agent = None
-    if agent_id:
-        # Lazy import to avoid cycle
-        from app.models.agents import Agent
+    if not agent_id:
+        return None, None, None
+    from app.models.agents import Agent
 
-        result = await db.execute(select(Agent).where(Agent.id == agent_id))
-        agent = result.scalar_one_or_none()
-        if agent is None:
-            raise NotFoundError("agent not found")
-        if not agent.is_public and str(agent.user_id) != str(user_id):
-            raise ForbiddenError("unauthorised")
-        # Agent's own max_iterations/token_budget override the global settings
-        # only for this run — preset fallback stays for non-agent chats.
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise NotFoundError("agent not found")
+    if not agent.is_public and str(agent.user_id) != str(user_id):
+        raise ForbiddenError("unauthorised")
+    return agent_id, agent_version, agent
+
+
+async def _ensure_conversation_agent_binding(conversation_id: str, agent_id: str, agent_version, agent, db: AsyncSession) -> None:
+    """Ensure the conversation row is stamped with agent_id/version for scoping."""
+    if not agent_id:
+        return
+    from app.models.conversations import Conversation as ConvRow
+
+    cres = await db.execute(select(ConvRow).where(ConvRow.id == conversation_id))
+    crow = cres.scalar_one_or_none()
+    if crow is not None and crow.agent_id is None:
+        crow.agent_id = agent_id
+        crow.agent_version = agent_version if agent_version is not None else agent.version
+        await db.commit()
+
+
+async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession):
+    agent_id, agent_version, agent = await _resolve_agent(request, user_id, db)
 
     conversation_id = None
     try:
@@ -241,17 +255,7 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
             # convo helper which reads request.agent_id (set above).
             pass
         conversation_id = await conversation(request, user_id, db)
-        # If this is an existing conversation being continued as an agent chat,
-        # ensure the conversation's agent_id is set/updated for scoping.
-        if agent_id:
-            from app.models.conversations import Conversation as ConvRow
-
-            cres = await db.execute(select(ConvRow).where(ConvRow.id == conversation_id))
-            crow = cres.scalar_one_or_none()
-            if crow is not None and crow.agent_id is None:
-                crow.agent_id = agent_id
-                crow.agent_version = agent_version if agent_version is not None else agent.version
-                await db.commit()
+        await _ensure_conversation_agent_binding(conversation_id, agent_id, agent_version, agent, db)
         user_content = request.messages[-1].content
         history = await load_history(conversation_id, user_content, db)
         messages = history + [{"role": "user", "content": user_content}]

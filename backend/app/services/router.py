@@ -82,43 +82,45 @@ def resolve_role(request: ChatRequest) -> str:
     return "local"
 
 
-async def get_provider(request: ChatRequest, user_id: str, db: AsyncSession) -> Tuple[LLMProvider, str, str]:
-    """Resolve (provider adapter, model, role) for a chat/agent request.
+async def _resolve_pinned_provider(request: ChatRequest, user_id: str, db: AsyncSession) -> Tuple[LLMProvider, str, str] | None:
+    """Try to resolve a pinned provider_id; returns None when no pin is set."""
+    if not request.provider_id:
+        return None
+    result = await db.execute(select(ProviderRow).where(ProviderRow.id == request.provider_id))
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise NotFoundError(f"provider {request.provider_id} not found")
+    if str(row.user_id) != str(user_id):
+        raise ForbiddenError("unauthorised")
+    if request.model == "auto" and row.default_model is None:
+        raise ProviderConfigError(
+            f"provider '{row.name}' has no default model configured; set a default model or pass an explicit model"
+        )
+    provider = row_to_provider(row)
+    model = request.model if request.model != "auto" else row.default_model
+    return provider, model, row.role
 
-    A pinned provider_id wins over every heuristic. Otherwise the pure
-    routing rules pick the role and the registry supplies that role's default
-    row; with no configured rows we fall back to the legacy env-var clients so
-    existing deployments keep working untouched.
-    """
-    if request.provider_id:
-        result = await db.execute(select(ProviderRow).where(ProviderRow.id == request.provider_id))
-        row = result.scalar_one_or_none()
-        if row is None:
-            raise NotFoundError(f"provider {request.provider_id} not found")
-        if str(row.user_id) != str(user_id):
-            raise ForbiddenError("unauthorised")
-        if request.model == "auto" and row.default_model is None:
-            raise ProviderConfigError(
-                f"provider '{row.name}' has no default model configured; "
-                "set a default model or pass an explicit model"
-            )
-        provider = row_to_provider(row)
-        model = request.model if request.model != "auto" else row.default_model
-        return provider, model, row.role
 
-    role = resolve_role(request)
+async def _resolve_default_provider_for_role(
+    request: ChatRequest, user_id: str, role: str, db: AsyncSession
+) -> Tuple[LLMProvider, str, str] | None:
+    """Try the user's default provider for the resolved role; None when absent."""
     row = await get_default_provider(db, user_id, role)
-    if row is not None:
-        if request.model == "auto" and row.default_model is None:
-            raise ProviderConfigError(
-                f"provider '{row.name}' has no default model configured; "
-                "set a default model or pass an explicit model"
-            )
-        provider = row_to_provider(row)
-        model = request.model if request.model != "auto" else row.default_model
-        return provider, model, role
+    if row is None:
+        return None
+    if request.model == "auto" and row.default_model is None:
+        raise ProviderConfigError(
+            f"provider '{row.name}' has no default model configured; set a default model or pass an explicit model"
+        )
+    provider = row_to_provider(row)
+    model = request.model if request.model != "auto" else row.default_model
+    return provider, model, role
 
-    # legacy env-var fallback: no configured rows for this role
+
+def _fallback_provider(
+    request: ChatRequest, role: str
+) -> Tuple[LLMProvider, str, str]:
+    """Legacy env-var fallback for when no provider row exists."""
     if role == "local":
         provider = OpenAICompatProvider(
             base_url=settings.LM_URL,
@@ -127,10 +129,21 @@ async def get_provider(request: ChatRequest, user_id: str, db: AsyncSession) -> 
         )
         model = request.model if request.model != "auto" else provider.default_model
         return provider, model, role
-
     key = get_openrouter_api_key()
     if not key:
         raise RuntimeError("OpenRouter is not configured (no API key)")
     provider = OpenRouterProvider(api_key=key, default_model=settings.OPENROUTER_DEFAULT_MODEL)
     model = request.model if request.model != "auto" else provider.default_model
     return provider, model, role
+
+
+async def get_provider(request: ChatRequest, user_id: str, db: AsyncSession) -> Tuple[LLMProvider, str, str]:
+    """Resolve (provider adapter, model, role) for a chat/agent request."""
+    pinned = await _resolve_pinned_provider(request, user_id, db)
+    if pinned is not None:
+        return pinned
+    role = resolve_role(request)
+    via_default = await _resolve_default_provider_for_role(request, user_id, role, db)
+    if via_default is not None:
+        return via_default
+    return _fallback_provider(request, role)
