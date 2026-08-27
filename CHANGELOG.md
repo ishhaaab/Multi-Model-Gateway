@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-27 — Design-practice cleanup (frontend SSE contract single-sourced)
+
+- Frontend: `AgentEvent` is no longer declared twice. `lib/types.ts` re-exports it from `lib/agent-events.ts` (which owns the runtime validators `parseAgentEvent`/`parseFileEditResult`), so the SSE contract has one source instead of drifting duplicates. The `undo` endpoint's response type in `lib/api-endpoints.ts` was corrected from `FileEdit` (the DB row) to `{ edit_id, undone, commit_sha }`, matching the backend `store.undo` return shape.
+
 ## 2026-08-27 — Design-practice cleanup (one agent-ownership helper)
 
 - Backend: `routers/agents.py` re-ran the agent-ownership + install-eligibility query inline in 6 routes. Added two module-level helpers — `_get_owned_agent` (404 missing / 403 not-owner; used by update/delete/publish) and `_get_workspace_agent` (owner, installer, or public agent; used by the 4 workspace routes) — so the ownership policy lives once and matches the repo's 404-vs-403 convention.

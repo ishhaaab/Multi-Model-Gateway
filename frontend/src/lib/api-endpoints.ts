@@ -259,7 +259,11 @@ export const workspaceApi = {
       `/v1/agents/${encodeURIComponent(agentId)}/workspace/edits${params ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}` : ""}`
     ),
   undo: (agentId: string, editId: string) =>
-    apiClient.request<FileEdit>("POST", `/v1/agents/${encodeURIComponent(agentId)}/workspace/undo`, { edit_id: editId }),
+    apiClient.request<{ edit_id: string; undone: string; commit_sha: string | null }>(
+      "POST",
+      `/v1/agents/${encodeURIComponent(agentId)}/workspace/undo`,
+      { edit_id: editId }
+    ),
 };
 
 // ───────────── Deep Research ─────────────

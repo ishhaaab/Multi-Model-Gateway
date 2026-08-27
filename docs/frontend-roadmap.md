@@ -183,7 +183,7 @@ owner-or-installer on the agent; `DELETE …/install` removes the installer's po
 - `GET /v1/agents/{id}/workspace/file?path=...` → `{content, lines:[{n, hash, text}]}` via `read_file`.
 - `GET /v1/agents/{id}/workspace/edits?limit=&offset=` → `{data: FileEdit[]}` where `FileEdit`
   is `{id, user_id, agent_id, store, path, patch, before_hash, after_hash, tool_call_id, created_at}`.
-- `POST /v1/agents/{id}/workspace/undo {edit_id}` → `{edit_id: newId, undone: editId}`; 404 when
+- `POST /v1/agents/{id}/workspace/undo {edit_id}` → `{edit_id: newId, undone: editId, commit_sha: string|null}`; 404 when
   the edit doesn't exist and 403 when `file_edits.user_id != caller` (per-running-user
   isolation — you can't undo another user's workspace). Undo is `git revert` of the commit
   that mentions the original `edit_id` plus a new audit row.

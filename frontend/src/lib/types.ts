@@ -329,12 +329,9 @@ export interface FileEdit {
 }
 
 // SSE events from POST /v1/agent/chat (one JSON object per `data:` line).
-export type AgentEvent =
-  | { type: "tool_call"; id: string; name: string; arguments: string }
-  | { type: "tool_result"; id: string; name: string; content: string }
-  | { type: "token"; content: string }
-  | { type: "error"; message: string }
-  | { type: "done"; conversation_id: string; truncated?: boolean; agent_id?: string; agent_version?: number };
+// Re-exported from agent-events.ts, which owns the runtime validators
+// (parseAgentEvent / parseFileEditResult) — the single source for the contract.
+export type { AgentEvent } from "./agent-events";
 
 // ───────────── Deep Research ─────────────
 export type ResearchStatus =
