@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-27 — Test coverage: agent adapter (policy + tool dispatch)
+
+- Tests: new `backend/tests/test_agent_adapter.py` (21 cases) covering the agent adapter's DB-free surface — `get_allowed_tools` (per-tenant policy), `get_allowed_tools_for_agent` (agent.allowed_tools ∩ per-user grant ∩ master switch; 404/403), `_resolve_agent` (404/403/public-read), `_ensure_conversation_agent_binding` (stamp / don't-overwrite / version default), and `_execute_tool` (invalid JSON, non-object args, timeout, handler exception-as-string, truncation). All run with a mocked DB + stubbed registry.
+- Tests: extracted a shared `tests/agent_test_stubs.py` (`import_with_stubs`) used by the agent-package + file/bash/sandbox tests — it stubs asyncpg/pgvector/redis/prometheus/langfuse/arq only during import and restores them, so these coverage tests run on a bare host without polluting sibling tests. `test_agent.py`/`test_agent_runtime.py` now use it (so they run consistently, no longer skip-on-host via a stale-guard side effect).
+
 ## 2026-08-27 — Test coverage: workspace file + bash tools (T3)
 
 - Tests: new `backend/tests/test_file_tools.py` (11 cases) covering the file tools (`list_files`/`read_file`/`write_file`/`edit_patch`/`edit_lines`) and `bash` inside a temp git workspace — write→read roundtrip with per-line hashes, list, missing-agent error, edit_lines replacement, hash-mismatch conflict, edit_patch diff, stale-expected-hashes conflict, and bash (missing cmd, too-long cmd, structured mock-sandbox output). Runs offline (stubs asyncpg/pgvector/redis/etc. only during import, then restores so sibling tests are unaffected).

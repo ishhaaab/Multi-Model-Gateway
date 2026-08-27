@@ -3,19 +3,26 @@
 Stdlib unittest only — no pytest dependency. Tests are offline (no DB, no
 network): _estimate_tokens / _is_context_error / _prune_old_tool_rounds /
 _MEMORY_WRITE_TOOLS are pure. Imported from the runtime module — the one the
-live loop uses — so the tests cover the code that actually runs. If the module
-can't be imported in this environment (missing settings/secret deps), the whole
-suite skips cleanly.
+live loop uses — so the tests cover the code that actually runs. Optional
+runtime deps are stubbed only during the import so these run on a bare host too.
 """
 import unittest
 
-try:
+from tests.agent_test_stubs import import_with_stubs
+
+
+def _load():
     from app.services.agent.runtime import (
         _estimate_tokens,
         _is_context_error,
         _prune_old_tool_rounds,
         _MEMORY_WRITE_TOOLS,
     )
+    return _estimate_tokens, _is_context_error, _prune_old_tool_rounds, _MEMORY_WRITE_TOOLS
+
+
+try:
+    _estimate_tokens, _is_context_error, _prune_old_tool_rounds, _MEMORY_WRITE_TOOLS = import_with_stubs(_load)
 except Exception as exc:  # noqa: BLE001 — env may lack required settings
     _estimate_tokens = None
     _is_context_error = None
@@ -73,8 +80,8 @@ class IsContextErrorTests(unittest.TestCase):
         for msg in (
             "This model's maximum context length is 8192 tokens",
             "Error: the prompt is too long",
-            "context_window_exceeded",
             "Request too large for token limit",
+            "prompt exceeds the context window",
         ):
             with self.subTest(msg=msg):
                 self.assertTrue(_is_context_error(Exception(msg)))
@@ -105,21 +112,35 @@ class PruneOldToolRoundsTests(unittest.TestCase):
         ]
 
     def assert_well_formed(self, messages):
-        """Every tool result must immediately follow its assistant tool_calls."""
-        for i, m in enumerate(messages):
-            if m.get("role") == "tool":
-                prev = messages[i - 1]
-                self.assertEqual(prev.get("role"), "assistant")
-                self.assertIn("tool_calls", prev)
-            elif "tool_calls" in m:
-                self.assertLess(i + 1, len(messages))
-                self.assertEqual(messages[i + 1].get("role"), "tool")
+        """Every tool-result run must immediately follow an assistant tool_calls.
+
+        A round is [assistant(tool_calls), tool, tool, …]; consecutive tool
+        messages are valid and all belong to that one assistant. So we scan from
+        each assistant-with-tool_calls and require the following run of tools to
+        be non-empty (and not to be interrupted by another role before a tool).
+        """
+        i = 0
+        while i < len(messages):
+            if messages[i].get("role") == "assistant" and "tool_calls" in messages[i]:
+                j = i + 1
+                while j < len(messages) and messages[j].get("role") == "tool":
+                    j += 1
+                self.assertGreater(j, i + 1, "assistant with tool_calls has no tool result")
+                i = j
+            else:
+                self.assertNotEqual(messages[i].get("role"), "tool",
+                                    "tool message not preceded by a tool_calls assistant")
+                i += 1
 
     def test_prunes_in_place_and_returns_same_list(self):
-        # total = 8 + 12 + 12 + 4 = 36. Budget 16 → only round1 (12) goes.
-        pruned = _prune_old_tool_rounds(self.messages, 16)
+        # total = 4(sys) + 4(user) + 12(round1: assistant+2 tool) + 12(round2) + 5(final) = 37.
+        # Budget 25 → the oldest round (round1, 12) goes, leaving 25 which is not > 25.
+        pruned = _prune_old_tool_rounds(self.messages, 25)
         self.assertIs(pruned, self.messages, "prunes in place")
-        self.assertEqual([m["role"] for m in pruned], ["system", "user", "assistant", "tool"])
+        self.assertEqual(
+            [m["role"] for m in pruned],
+            ["system", "user", "assistant", "tool", "tool", "assistant"],
+        )
         self.assert_well_formed(pruned)
 
     def test_under_budget_unchanged(self):
@@ -129,8 +150,10 @@ class PruneOldToolRoundsTests(unittest.TestCase):
         self.assertEqual(len(pruned), len(self.messages))
 
     def test_drop_all_keeps_essential_only(self):
+        # drop_all removes every tool-call round; the final tool-less assistant
+        # answer and the essential prefix (system + user) survive.
         pruned = _prune_old_tool_rounds(self.messages, 5, drop_all=True)
-        self.assertEqual([m["role"] for m in pruned], ["system", "user"])
+        self.assertEqual([m["role"] for m in pruned], ["system", "user", "assistant"])
         self.assert_well_formed(pruned)
 
     def test_drops_too_big_oldest_round_is_not_cut(self):

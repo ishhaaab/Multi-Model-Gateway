@@ -4,17 +4,25 @@ Stdlib unittest only — no pytest dependency. Tests are offline (no DB, no
 network): _estimate_tokens / _is_context_error / _prune_old_tool_rounds are
 pure functions. They are imported from the runtime module (the one the live
 loop uses), not the adapter — so the tests cover the code that actually runs.
-If the module can't be imported in this environment (missing settings/secret
-deps), the whole suite skips cleanly.
+Optional runtime deps are stubbed only during the import so these run on a bare
+host too.
 """
 import unittest
 
-try:
+from tests.agent_test_stubs import import_with_stubs
+
+
+def _load():
     from app.services.agent.runtime import (
         _estimate_tokens,
         _is_context_error,
         _prune_old_tool_rounds,
     )
+    return _estimate_tokens, _is_context_error, _prune_old_tool_rounds
+
+
+try:
+    _estimate_tokens, _is_context_error, _prune_old_tool_rounds = import_with_stubs(_load)
 except Exception as exc:  # noqa: BLE001 — env may lack required settings
     _estimate_tokens = None
     _is_context_error = None
@@ -93,18 +101,21 @@ class PruneOldToolRoundsTests(unittest.TestCase):
         )
 
     def assert_well_formed(self, messages):
-        """Rounds stay intact: every tool message directly follows the
-        assistant that made the call, and every assistant-with-tool_calls is
-        followed by its tool results — no orphaned halves."""
-        for i, m in enumerate(messages):
-            if m.get("role") == "tool":
-                self.assertGreater(i, 0)
-                prev = messages[i - 1]
-                self.assertEqual(prev.get("role"), "assistant")
-                self.assertIn("tool_calls", prev)
-            elif "tool_calls" in m:
-                self.assertLess(i + 1, len(messages))
-                self.assertEqual(messages[i + 1].get("role"), "tool")
+        """Rounds stay intact: a run of tool messages must immediately follow
+        an assistant-with-tool_calls (consecutive tools = one assistant's
+        multiple results); no orphaned halves."""
+        i = 0
+        while i < len(messages):
+            if messages[i].get("role") == "assistant" and "tool_calls" in messages[i]:
+                j = i + 1
+                while j < len(messages) and messages[j].get("role") == "tool":
+                    j += 1
+                self.assertGreater(j, i + 1, "assistant with tool_calls has no tool result")
+                i = j
+            else:
+                self.assertNotEqual(messages[i].get("role"), "tool",
+                                    "tool message not preceded by a tool_calls assistant")
+                i += 1
 
     def test_prunes_oldest_round_only(self):
         # total = 7 * 4 = 28 tokens; essential + round2 = 8 + 8 = 16

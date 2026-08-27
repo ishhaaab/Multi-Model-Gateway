@@ -11,111 +11,22 @@ import asyncio
 import json
 import pathlib
 import subprocess
-import sys
 import tempfile
-import types
 import unittest
 
-
-def _install_stubs():
-    """Install DB-light / optional-deps stubs into sys.modules.
-
-    Returns a list of (name, prior_value) so the caller can restore the real
-    modules afterward — the tools package drags in asyncpg/pgvector/prometheus/
-    langfuse/redis/arq, none of which exist on a bare host, and we must not
-    leave the stubs behind for sibling test modules.
-    """
-    saved: list[tuple[str, object]] = []
-
-    def save(name: str, value: object) -> None:
-        saved.append((name, value))
-        sys.modules[name] = value
-
-    if "app.db" not in sys.modules:
-        from sqlalchemy.orm import declarative_base
-        fake = types.ModuleType("app.db")
-        fake.AsyncSessionLocal = None
-        fake.Base = declarative_base()
-        fake.get_db = lambda: None
-        save("app.db", fake)
-
-    if "pgvector" not in sys.modules and "pgvector.sqlalchemy" not in sys.modules:
-        from sqlalchemy.types import TypeDecorator, TypeEngine
-
-        class Vector(TypeDecorator):
-            impl = TypeEngine
-            cache_ok = True
-
-            def __init__(self, *a, **k):
-                super().__init__()
-
-        pv = types.ModuleType("pgvector")
-        pv_sa = types.ModuleType("pgvector.sqlalchemy")
-        pv_sa.Vector = Vector
-        save("pgvector", pv)
-        save("pgvector.sqlalchemy", pv_sa)
-
-    if "arq" not in sys.modules:
-        save("arq", types.ModuleType("arq"))
-    if "langfuse" not in sys.modules:
-        lf = types.ModuleType("langfuse")
-        lf.get_client = lambda *a, **k: None
-        lf.Langfuse = lambda *a, **k: None
-        save("langfuse", lf)
-    if "redis" not in sys.modules:
-        redis_pkg = types.ModuleType("redis")
-        redis_pkg.__path__ = []
-        redis_asyncio = types.ModuleType("redis.asyncio")
-        redis_asyncio.from_url = lambda *a, **k: None
-        redis_asyncio.Redis = lambda *a, **k: None
-        redis_pkg.asyncio = redis_asyncio
-        save("redis", redis_pkg)
-        save("redis.asyncio", redis_asyncio)
-    if "prometheus_client" not in sys.modules:
-        pc = types.ModuleType("prometheus_client")
-
-        class _Labels:
-            def inc(self, *_a, **_k):
-                return None
-
-            def observe(self, *_a, **_k):
-                return None
-
-        class _Metric:
-            def __init__(self, *_a, **_k):
-                pass
-
-            def labels(self, *_a, **_k):
-                return _Labels()
-
-        pc.Counter = _Metric
-        pc.Gauge = _Metric
-        pc.Histogram = _Metric
-        save("prometheus_client", pc)
-
-    return saved
+from tests.agent_test_stubs import import_with_stubs
 
 
-def _import_tools_with_stubs():
-    """Import the file/bash tools against stubbed deps, then restore sys.modules."""
-    saved = _install_stubs()
-    try:
-        from app.services.tools import files as _files  # noqa: F401
-        from app.services.tools import bash_tool as _bash  # noqa: F401
-        from app.services.tools.registry import ToolContext
-        from app.services.workspace.store import _line_hash
-        return _files, _bash, ToolContext, _line_hash
-    finally:
-        # Restore the real modules so sibling test modules see the real thing.
-        for name, prior in reversed(saved):
-            if prior is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = prior
+def _load():
+    from app.services.tools import files as _files  # noqa: F401
+    from app.services.tools import bash_tool as _bash  # noqa: F401
+    from app.services.tools.registry import ToolContext
+    from app.services.workspace.store import _line_hash
+    return _files, _bash, ToolContext, _line_hash
 
 
 try:
-    _files, _bash, ToolContext, _line_hash = _import_tools_with_stubs()
+    _files, _bash, ToolContext, _line_hash = import_with_stubs(_load)
 except Exception as exc:  # noqa: BLE001
     _files = None
     _bash = None

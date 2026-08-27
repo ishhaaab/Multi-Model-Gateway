@@ -551,6 +551,28 @@ The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 wo
   — it now also skips when `memory_files` is unavailable (the tools registry can import on a
   host that can't import `memory_files`, which previously ran the handler test with `None`).
 
+## Test coverage: agent adapter (policy + tool dispatch)
+
+- `services/agent/agent.py`'s policy helpers had no coverage beyond the pure R2 helpers. New
+  `backend/tests/test_agent_adapter.py` (21 cases) exercises the DB-free surface against a
+  mocked DB session + stubbed tool registry:
+  - `get_allowed_tools` — per-tenant policy: an explicit grant/deny row wins, otherwise
+    first-party allowed.
+  - `get_allowed_tools_for_agent` — the safety-ceiling intersection (agent.allowed_tools ∩
+    per-user grant ∩ ENABLE_CODE_EXECUTION master switch), plus 404 (missing) / 403 (private
+    not-owner).
+  - `_resolve_agent` — (None,None,None) when no agent_id; resolves the agent; 404/403;
+    public-read for anyone.
+  - `_ensure_conversation_agent_binding` — stamps an unbound conversation; defaults
+    `agent_version` to the row's version when not supplied; never overwrites an existing
+    binding.
+  - `_execute_tool` — invalid JSON → string, non-object args → string, timeout,
+    handler-exception-as-string (run survives), long-result truncation.
+- Shared stub helper `tests/agent_test_stubs.py` (`import_with_stubs`) so the agent-package,
+  file/bash, and sandbox tests run offline on a bare host without leaving stubs behind.
+  `test_agent.py` / `test_agent_runtime.py` now consistently run (they previously could skip
+  via a stale-guard ordering side effect).
+
 ## Reliability fixes implemented (R1 + R2)
 
 The agent-loop reliability pass from Phase 2, landed together.
