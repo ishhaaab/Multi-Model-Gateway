@@ -6,6 +6,7 @@
 - Config: new `SUGGEST_CLOUD_MODEL` (override the cloud model) and `SUGGEST_CLOUD_FALLBACK_MODELS` (comma-separated free-model candidates; default `meta-llama/llama-3.1-8b-instruct:free, google/gemma-2-9b-it:free, qwen/qwen-2-7b-instruct:free`).
 - Fix: `AppError` now accepts optional `status_code` kwarg — `services/workspace/store.py` raised `AppError(status_code=422, ...)` in 27 places but the constructor only accepted `detail`, so every path-security rejection (the "single 422 seam" from ADR-0002/0003) raised `TypeError` (a 500) instead of the intended domain code. Backward compatible: positional `detail` and subclass `status_code` still work.
 - Tests: new `backend/tests/test_workspace_store.py` (15 tests) covering `_resolveInside` (path-security 422 seam), `_line_hash`/`_file_hashes`, and the write→git-commit→audit→undo-by-commit_sha pipeline — offline (stubs `app.db` only during import, then restores it so sibling test modules are unaffected). Fixed stale `_validate_rel_path` reference in `test_agents.py` (renamed to `_resolveInside` in the deep-module refactor).
+- ADRs: cut four for the deep-module seams — `docs/adr/0005-agent-runtime.md` (AgentRuntime loop seam), `0006-provider-router.md` (provider resolution seam), `0007-agent-events.md` (typed frontend SSE contract), `0008-workspace.md` (path-security + edit/undo deep module).
 
 ## 2026-08-13 — Agents T3 wiring: workspace panel + undo UI
 

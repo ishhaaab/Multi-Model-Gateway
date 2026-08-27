@@ -51,3 +51,11 @@ Reversal of a File Edit via its `file_edits` audit row plus a git revert of the 
 **Agent Builder — Smart Suggest**:
 Button in AgentForm that drafts name, description, instructions, and suggested tools/model from a goal string. Result prefills the editable form.
 _Avoid_: builder chat (the chat-based builder was rejected)
+
+## Architecture decisions
+
+The deep-module seams are documented as ADRs in `docs/adr/`:
+- `0005-agent-runtime.md` — `AgentRuntime.run(ctx)` owns the loop/budget/prune/dispatch; no DB crosses the seam.
+- `0006-provider-router.md` — `ProviderRouter.resolve()` is the single pinned→default→fallback decision.
+- `0007-agent-events.md` — `lib/agent-events.ts` owns the typed SSE union + FileEditResult parsing.
+- `0008-workspace.md` — `WorkspaceStore` owns path security (the one 422 seam) and edit/undo.
