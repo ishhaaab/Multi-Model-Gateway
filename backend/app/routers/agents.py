@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Optional
 
@@ -7,11 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
+from app.core.config import settings
 from app.db import get_db
 from app.core.security import get_current_user
 from app.models.agents import Agent
 from app.models.agent_installs import AgentInstall
 from app.services.tools import registry
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -143,10 +147,17 @@ async def suggest_agent(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
-    """Smart Suggest: draft name/description/system_prompt + tools/model from a goal string."""
+    """Smart Suggest: draft name/description/system_prompt + tools/model from a goal string.
+
+    Cloud-then-local fallback (free-model aware): try OpenRouter with a :free
+    model first (your key is free-only), then LM Studio/local. A 401
+    "User not found." from OpenRouter no longer surfaces as a raw 502 — it
+    falls through to local and logs a hint.
+    """
     import json as _json
 
-    from app.services.router import ChatRequest, get_provider
+    from app.services.provider_router import ProviderRouter
+    from app.services.router import ChatRequest, Provider
 
     known_tools = [t.name for t in registry.all_tools()]
     tool_list_hint = ", ".join(known_tools[:20]) if known_tools else "(none registered)"
@@ -164,59 +175,135 @@ async def suggest_agent(
         f"Goal: {body.goal}\n"
         + (f"Context: {body.description}\n" if body.description else "")
     )
+    messages = [{"role": "user", "content": meta_prompt}]
 
-    req = ChatRequest(
-        messages=[{"role": "user", "content": meta_prompt}],  # type: ignore[arg-type]
-        model="auto",
-    )
-    try:
-        provider, model, _role = await get_provider(req, user_id, db)
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"no provider available for suggest: {e}")
+    def _looks_like_auth_error(msg: str) -> bool:
+        low = msg.lower()
+        return "user not found" in low or "401" in low and "unauthorized" in low or "invalid api key" in low or "authentication" in low
 
-    try:
-        text = await provider.complete(
-            messages=[{"role": "user", "content": meta_prompt}],
-            model=model,
-            temperature=0.7,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"suggest generation failed: {e}")
-
-    raw = (text or "").strip()
-    obj = None
-    try:
-        obj = _json.loads(raw)
-    except Exception:
+    def _parse_suggest_json(raw: str) -> dict | None:
+        raw = (raw or "").strip()
+        if not raw:
+            return None
+        try:
+            obj = _json.loads(raw)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
         start = raw.find("{")
         end = raw.rfind("}")
         if start != -1 and end != -1 and end > start:
             try:
                 obj = _json.loads(raw[start : end + 1])
+                if isinstance(obj, dict):
+                    return obj
             except Exception:
-                obj = None
-    if not isinstance(obj, dict):
+                return None
+        return None
+
+    def _build_response(obj: dict) -> SuggestResponse:
+        name = str(obj.get("name") or body.goal[:60]).strip()[:128] or body.goal[:60]
+        description = str(obj.get("description") or "").strip()[:512]
+        system_prompt = str(obj.get("system_prompt") or "").strip()[:4000]
+        suggested_tools = obj.get("suggested_tools") or []
+        if not isinstance(suggested_tools, list):
+            suggested_tools = []
+        known_set = set(known_tools)
+        suggested_tools = [str(t) for t in suggested_tools if str(t) in known_set][:10]
+        suggested_model = obj.get("suggested_model")
+        if suggested_model is not None:
+            suggested_model = str(suggested_model).strip()[:128] or None
+        return SuggestResponse(
+            name=name,
+            description=description or f"Agent for: {body.goal[:120]}",
+            system_prompt=system_prompt or f"You are a helpful assistant focused on: {body.goal}",
+            suggested_tools=suggested_tools,
+            suggested_model=suggested_model,
+        )
+
+    # Cloud candidates: explicit SUGGEST_CLOUD_MODEL first, then free fallbacks.
+    # If SUGGEST_CLOUD_MODEL is empty we still try the resolved cloud model
+    # (if it already ends with :free) before the fallback list.
+    cloud_candidates: list[str] = []
+    if settings.SUGGEST_CLOUD_MODEL.strip():
+        cloud_candidates.append(settings.SUGGEST_CLOUD_MODEL.strip())
+    cloud_candidates.extend([m.strip() for m in settings.SUGGEST_CLOUD_FALLBACK_MODELS.split(",") if m.strip()])
+
+    last_cloud_error: str | None = None
+    # --- Attempt 1: cloud (OpenRouter) ---
+    try:
+        cloud_req = ChatRequest(messages=messages, model="auto", provider=Provider.openrouter)  # type: ignore[arg-type]
+        resolved_cloud = await ProviderRouter().resolve(cloud_req, user_id, db)
+        # Prefer a :free model even if the user's default is a paid one
+        ordered: list[str] = []
+        if resolved_cloud.model and resolved_cloud.model.strip().endswith(":free"):
+            ordered.append(resolved_cloud.model.strip())
+        # dedupe while preserving order
+        seen = set()
+        for m in cloud_candidates:
+            if m not in seen:
+                ordered.append(m)
+                seen.add(m)
+        # also ensure resolved :free was counted in seen
+        for cand in ordered:
+            try:
+                text = await resolved_cloud.provider.complete(messages=messages, model=cand, temperature=0.7)
+            except Exception as e:  # noqa: BLE001
+                msg = str(e)
+                last_cloud_error = msg
+                # Auth / model-not-found / rate-limit on one free model -> try next free model
+                if _looks_like_auth_error(msg):
+                    logger.warning("suggest cloud auth failed on %s: %s", cand, msg)
+                else:
+                    logger.warning("suggest cloud failed on %s: %s", cand, msg)
+                continue
+            obj = _parse_suggest_json(text)
+            if obj is not None:
+                logger.info("suggest served from cloud %s", cand)
+                return _build_response(obj)
+            logger.warning("suggest cloud %s returned non-JSON, trying next candidate", cand)
+            last_cloud_error = f"cloud {cand} returned non-JSON"
+        if last_cloud_error and _looks_like_auth_error(last_cloud_error):
+            logger.warning("suggest cloud exhausted (auth): %s — falling back to local", last_cloud_error)
+        elif last_cloud_error:
+            logger.warning("suggest cloud exhausted: %s — falling back to local", last_cloud_error)
+        else:
+            logger.info("suggest cloud had no candidates — falling back to local")
+    except Exception as e:  # noqa: BLE001 — no cloud configured is expected
+        last_cloud_error = str(e)
+        if _looks_like_auth_error(last_cloud_error):
+            logger.warning("suggest cloud unavailable (auth): %s — falling back to local", last_cloud_error)
+        else:
+            logger.info("suggest cloud unavailable: %s — falling back to local", last_cloud_error)
+
+    # --- Attempt 2: local (LM Studio / OpenAI-compatible) ---
+    try:
+        local_req = ChatRequest(messages=messages, model="auto", provider=Provider.local)  # type: ignore[arg-type]
+        resolved_local = await ProviderRouter().resolve(local_req, user_id, db)
+        text = await resolved_local.provider.complete(messages=messages, model=resolved_local.model, temperature=0.7)
+        obj = _parse_suggest_json(text)
+        if obj is not None:
+            logger.info("suggest served from local %s", resolved_local.model)
+            return _build_response(obj)
         raise HTTPException(status_code=502, detail="suggest could not produce valid JSON")
-
-    name = str(obj.get("name") or body.goal[:60]).strip()[:128] or body.goal[:60]
-    description = str(obj.get("description") or "").strip()[:512]
-    system_prompt = str(obj.get("system_prompt") or "").strip()[:4000]
-    suggested_tools = obj.get("suggested_tools") or []
-    if not isinstance(suggested_tools, list):
-        suggested_tools = []
-    known_set = set(known_tools)
-    suggested_tools = [str(t) for t in suggested_tools if str(t) in known_set][:10]
-    suggested_model = obj.get("suggested_model")
-    if suggested_model is not None:
-        suggested_model = str(suggested_model).strip()[:128] or None
-
-    return SuggestResponse(
-        name=name,
-        description=description or f"Agent for: {body.goal[:120]}",
-        system_prompt=system_prompt or f"You are a helpful assistant focused on: {body.goal}",
-        suggested_tools=suggested_tools,
-        suggested_model=suggested_model,
-    )
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        msg = str(e)
+        logger.warning("suggest local failed: %s", msg)
+        # Both tiers failed — surface a useful hint instead of raw provider payload
+        if last_cloud_error and _looks_like_auth_error(last_cloud_error):
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "suggest generation failed on cloud (401 User not found — check OpenRouter API key) "
+                    f"and local fallback failed: {msg}"
+                ),
+            )
+        if last_cloud_error:
+            raise HTTPException(status_code=502, detail=f"suggest generation failed (cloud: {last_cloud_error}; local: {msg})")
+        raise HTTPException(status_code=502, detail=f"suggest generation failed: {msg}")
 
 
 # ── Param routes ──

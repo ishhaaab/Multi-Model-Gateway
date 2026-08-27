@@ -48,6 +48,16 @@ class Settings(BaseSettings):
 
     OPENROUTER_DEFAULT_MODEL: str= ""
 
+    # Suggest (POST /v1/agents/suggest): cloud-then-local fallback.
+    # Cloud uses a :free model first so users on free-only keys stay green.
+    # Empty => derive :free variant of the resolved model, then try this list.
+    SUGGEST_CLOUD_MODEL: str = ""
+    SUGGEST_CLOUD_FALLBACK_MODELS: str = (
+        "meta-llama/llama-3.1-8b-instruct:free,"
+        "google/gemma-2-9b-it:free,"
+        "qwen/qwen-2-7b-instruct:free"
+    )
+
     # Agent / MCP tools
     AGENT_MAX_ITERATIONS: int = 6        # hard cap on model to tool round-trips per run
     AGENT_TOKEN_BUDGET: int = 24000      # total prompt+completion tokens per agent run

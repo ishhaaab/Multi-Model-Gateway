@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-27 — Smart Suggest: cloud-then-local fallback (free-model aware)
+
+- Backend: `POST /v1/agents/suggest` now tries OpenRouter with an ordered list of `:free` models first, then falls back to LM Studio/local — so a free-only OpenRouter key no longer surfaces a raw `502 "suggest generation failed: ... User not found."`. A 401/`User not found.` is detected as an auth error and falls through to local; only when both tiers fail does it return a 502 with a hint instead of the raw provider payload.
+- Config: new `SUGGEST_CLOUD_MODEL` (override the cloud model) and `SUGGEST_CLOUD_FALLBACK_MODELS` (comma-separated free-model candidates; default `meta-llama/llama-3.1-8b-instruct:free, google/gemma-2-9b-it:free, qwen/qwen-2-7b-instruct:free`).
+
 ## 2026-08-13 — Agents T3 wiring: workspace panel + undo UI
 
 - Frontend: finished T3-004 — `WorkspacePanel` now backed by `workspace-store` (`files/edits/fetchAll/undo`), `HistoryTimeline` (edits → Undo), `RightSidebar` Tools | Workspace tabs on `/agent`, `use-agent` extracts `edit_id` from every file-tool `tool_result` into `AgentStep.edit_id`; `DiffView` for file edits in `ToolStepCard` unchanged.

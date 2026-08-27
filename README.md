@@ -310,6 +310,8 @@ Auto HTTPS is disabled. The frontend should call `/api/v1/*` and Caddy will forw
 | `COMFY_URL` | No | ComfyUI base URL for image generation (default: `http://host.docker.internal:8188`) |
 | `OPENROUTER_API_KEY` | No | OpenRouter API key |
 | `OPENROUTER_DEFAULT_MODEL` | No | Default OpenRouter model |
+| `SUGGEST_CLOUD_MODEL` | No | Pin a specific cloud model for `POST /v1/agents/suggest` (empty = derive from the resolved provider model). Try a `:free` model if your key is free-only |
+| `SUGGEST_CLOUD_FALLBACK_MODELS` | No | Comma-separated free-model candidates Smart Suggest tries after the primary cloud model, before falling back to local (default `meta-llama/llama-3.1-8b-instruct:free, google/gemma-2-9b-it:free, qwen/qwen-2-7b-instruct:free`) |
 | `POSTGRES_USER` | Yes | PostgreSQL user, required by docker-compose (default `ishaab`; the setup scripts add it to `.env` if missing). Must match the user embedded in `DATABASE_URL` |
 | `POSTGRES_DB` | Yes | PostgreSQL database name, required by docker-compose (default `llmgateway`; the setup scripts add it to `.env` if missing). Must match the database embedded in `DATABASE_URL` |
 | `DATABASE_URL` | Yes | PostgreSQL connection string (user/db must match `POSTGRES_USER` / `POSTGRES_DB`) |
