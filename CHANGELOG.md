@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-27 — Test coverage: workspace file + bash tools (T3)
+
+- Tests: new `backend/tests/test_file_tools.py` (11 cases) covering the file tools (`list_files`/`read_file`/`write_file`/`edit_patch`/`edit_lines`) and `bash` inside a temp git workspace — write→read roundtrip with per-line hashes, list, missing-agent error, edit_lines replacement, hash-mismatch conflict, edit_patch diff, stale-expected-hashes conflict, and bash (missing cmd, too-long cmd, structured mock-sandbox output). Runs offline (stubs asyncpg/pgvector/redis/etc. only during import, then restores so sibling tests are unaffected).
+- Tests: `test_memory_files.py` `MemoryToolsRegistryTests` now also skips when `memory_files` is unavailable (exposed a pre-existing ordering fragility when the tools package is pre-imported).
+
 ## 2026-08-27 — Test coverage: sandbox seam (T3 execution boundary)
 
 - Tests: new `backend/tests/test_sandbox.py` (13 cases) covering the Sandbox seam — the `Sandbox` Protocol / `ExecResult` dataclass, `MockSandbox` (echo + fail-keyword + truncation, never touches the filesystem), `HttpSandbox` (POST-to-`/exec` body mapping, timeout → exit 124, HTTP error → exit 1, via a stubbed httpx client), and `get_sandbox()` backend selection (mock when disabled/no URL, HTTP when enabled+URL set).

@@ -364,6 +364,11 @@ class MemoryToolsRegistryTests(unittest.TestCase):
             from app.services.tools import registry
         except Exception as exc:  # noqa: BLE001
             raise unittest.SkipTest(f"tools registry import failed: {exc}")
+        # The handlers reference memory_files service functions; if that module
+        # didn't import (e.g. host without asyncpg), the registry alone isn't
+        # enough to exercise them.
+        if memory_files is None:
+            raise unittest.SkipTest("app.services.memory_files is unavailable in this env")
         cls.registry = registry
         # ONE loop for handler tests; storage tests use their own class loop,
         # and both classes create separate loops — no shared connections.

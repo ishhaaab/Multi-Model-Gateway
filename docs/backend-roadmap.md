@@ -533,6 +533,24 @@ The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 wo
   - `get_sandbox()` selection — Mock when `ENABLE_CODE_EXECUTION` is off or `SANDBOX_URL` is
     empty; Http when both are set.
 
+## Test coverage: workspace file + bash tools (T3)
+
+- `services/tools/files.py` and `services/tools/bash_tool.py` had no direct tests. New
+  `backend/tests/test_file_tools.py` (11 cases) exercises the handlers against a real
+  git-backed temp workspace (setUp creates a throwaway root; `_workspace_path` is patched to
+  it; a fake DB is passed through `ToolContext`):
+  - `list_files` / `read_file` (content + per-line `{n, hash, text}`) / `write_file` (commit +
+    `edit_id` + `commit_sha`) roundtrip; `edit_lines` hashline replacement;
+    hash-mismatch → "Error: … changed" conflict; `edit_patch` unified-diff application;
+    stale-`expected_hashes` conflict; missing-`agent_id` → "no workspace".
+  - `bash` — missing/too-long command, and structured `{stdout, stderr, exit_code}` output via
+    the mock sandbox (which shares the workspace lock).
+- Offline, like `test_workspace_store`: stub asyncpg/pgvector/redis/prometheus/langfuse/arq
+  only during import then restore them, so sibling test modules aren't affected.
+- Fixed a pre-existing ordering fragility in `test_memory_files.py`'s `MemoryToolsRegistryTests`
+  — it now also skips when `memory_files` is unavailable (the tools registry can import on a
+  host that can't import `memory_files`, which previously ran the handler test with `None`).
+
 ## Reliability fixes implemented (R1 + R2)
 
 The agent-loop reliability pass from Phase 2, landed together.
