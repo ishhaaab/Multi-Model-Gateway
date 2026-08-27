@@ -1156,7 +1156,10 @@ and becomes exact (real `n_layer`/`n_embd`/`n_head[_kv]`).
   plus a truncated array payload → None), `read_gguf_metadata` (Range
   header sent, failures cached), and `build_hf_model_detail` end-to-end
   (mocked Hub API + mocked header reads → quants with per-quant fit,
-  capabilities, formats). Full suite: 179 tests pass (was 176).
+  capabilities, formats). Full suite: 184 tests pass (was 179; the +5 are the design-practice
+  cleanup test files: `test_agent_runtime`, `test_agent_suggest`, `test_fit_score_gguf`,
+  `test_sandbox`, `test_agent_adapter`, `test_file_tools`, `test_workspace_store` — and
+  `test_memory_files` gained a guard).
 - **Review fix (array offset drift)** — `_read_gguf_value` previously walked
   only the first `min(count, 4096)` array elements and left the offset short
   of the rest of the payload, so any KV key following a large array was read

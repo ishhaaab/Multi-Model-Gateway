@@ -276,7 +276,31 @@ curl http://localhost:2727/health          # {"status":"ok"}
 cd backend && alembic upgrade head
 # worker (deep research) — separate container; restart after research code changes
 arq app.worker.WorkerSettings
+
+# backend unit tests (stdlib unittest, no pytest)
+cd backend && python -m unittest discover -s tests -p "test_*.py"
 ```
+
+## Test conventions (backend)
+
+- **Stdlib `unittest` only** — no pytest dependency. `Discover` from `backend/`:
+  `python -m unittest discover -s tests -p "test_*.py"`.
+- Tests that need Postgres/asyncpg/pgvector/redis/arq/prometheus/langfuse run in the
+  **Docker container** (they have those deps); on a bare host many modules import a chain of
+  those optional deps and **skip** cleanly via a `try/except` import guard (the
+  `_IMPORT_ERROR` / `setUpClass` skip pattern).
+- **Offline tests** (`services/workspace/store.py`, the agent-package/tools/sandbox tests)
+  import against stubbed optional deps. Use the shared helper
+  `tests/agent_test_stubs.py::import_with_stubs(import_fn)`: it installs lightweight
+  `app.db`/`pgvector`/`redis`/`prometheus_client`/`langfuse`/`arq` stubs only during the
+  import, then restores the real modules so sibling test files aren't polluted. A test file
+  that does this must not leak the stubs globally.
+- When you add a test for a module under `app.services`, prefer pushing it to run offline
+  (stub the optional deps via `import_with_stubs`) rather than relying on the
+  skip-on-host guard, so the coverage actually executes on a dev box.
+- Line-range / path references in `docs/frontend-roadmap.md` (e.g. "port from
+  `api-client.ts:177-262`") can drift when the file is refactored — re-check them after
+  touching the referenced module.
 
 Warnings for agents working in this repo:
 - Do NOT commit `.env`, `secrets/`, or anything containing real keys. `frontend/dist` is build output.

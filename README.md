@@ -273,6 +273,20 @@ the pinned dependencies, migrates a scratch PostgreSQL database to head and fail
 SQLAlchemy models and Alembic migrations disagree (schema-drift guard), then runs the
 backend unit tests.
 
+## Running the tests
+
+Backend tests are stdlib `unittest` (no pytest dependency):
+
+```bash
+cd backend && python -m unittest discover -s tests -p "test_*.py"
+```
+
+Tests that touch Postgres/asyncio/pgvector/redis/arq/prometheus/langfuse run in the Docker
+container (those deps). Offline tests — the workspace store and the agent/tools/sandbox
+coverage — stub the optional runtime deps only during import via
+`tests/agent_test_stubs.py::import_with_stubs`, so they run on a bare dev host without
+polluting sibling test modules; see `AGENTS.md` → "Test conventions (backend)".
+
 ---
 
 ## Docker Services
