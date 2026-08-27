@@ -496,6 +496,17 @@ The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 wo
     installer-eligibility check mirrors `_resolve_agent` in `services/agent/agent.py`.
   - `_load_agent(db, agent_id)` — a bare fetch without any ownership check.
 
+## Design-practice cleanup (Smart Suggest extracted to a service)
+
+- The Smart Suggest LLM orchestration (~200 lines of cloud→local fallback with JSON
+  parsing) lived in `routers/agents.py`, which also owns agent CRUD, marketplace, and the
+  workspace routes. Moved it into a new `services/agent_suggest.py` deep module: one async
+  `suggest(goal, description, user_id, db) → Suggest` seam, plus the pure helpers
+  (`_parse_suggest_json`, `_build_suggest`, `_looks_like_auth_error`, `_cloud_candidates`).
+- The router `POST /agents/suggest` is now a thin handler that calls the service and
+  translates the domain `SuggestError` → 502. The response shape is unchanged, so the API
+  contract is untouched. New `backend/tests/test_agent_suggest.py` covers the pure helpers.
+
 ## Reliability fixes implemented (R1 + R2)
 
 The agent-loop reliability pass from Phase 2, landed together.

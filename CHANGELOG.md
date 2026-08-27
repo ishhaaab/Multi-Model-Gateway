@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-27 — Design-practice cleanup (Smart Suggest extracted to a service)
+
+- Backend: `Smart Suggest` (the ~200-line cloud→local LLM fallback chain) moved out of `routers/agents.py` into a new `services/agent_suggest.py` deep module. The router handler is now a thin `POST /agents/suggest` that calls `agent_suggest.suggest(goal, description, user_id, db)` and translates `SuggestError` → 502. The service raises a domain `SuggestError` (not `HTTPException`) on failure; the sugared response shape (`name`/`description`/`system_prompt`/`suggested_tools`/`suggested_model`) is unchanged.
+- Tests: new `backend/tests/test_agent_suggest.py` covering the pure helpers (`_parse_suggest_json`, `_build_suggest`, `_looks_like_auth_error`).
+
 ## 2026-08-27 — Design-practice cleanup (frontend SSE contract single-sourced)
 
 - Frontend: `AgentEvent` is no longer declared twice. `lib/types.ts` re-exports it from `lib/agent-events.ts` (which owns the runtime validators `parseAgentEvent`/`parseFileEditResult`), so the SSE contract has one source instead of drifting duplicates. The `undo` endpoint's response type in `lib/api-endpoints.ts` was corrected from `FileEdit` (the DB row) to `{ edit_id, undone, commit_sha }`, matching the backend `store.undo` return shape.
