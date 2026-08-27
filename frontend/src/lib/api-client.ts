@@ -238,6 +238,10 @@ class ApiClient {
    * `data: [DONE]\n\n`, and emits errors as `data: [ERROR] <msg>\n\n`. We parse
    * on the `\n\n` event boundary so multi-line tokens survive, and still tolerate
    * the legacy `ERROR:` / `Internal server error` shapes.
+   *
+   * Transport reading (the `\n\n` boundary split + tail flush) is shared with
+   * `_readSseStream` via `_readSseChunks`; only the event interpreter differs
+   * (plain tokens here vs JSON objects there).
    */
   async streamChat(
     body: ChatRequest,
@@ -265,10 +269,8 @@ class ApiClient {
     if (!reader) return onError("Streaming not supported by this browser.");
 
     const decoder = new TextDecoder();
-    let buffer = "";
 
-    const handleEvent = (rawEvent: string): boolean => {
-      const event = rawEvent.replace(/\r/g, "");
+    const handleEvent = (event: string): boolean => {
       if (event.length === 0) return false;
 
       if (event.startsWith("data: ")) {
@@ -302,27 +304,43 @@ class ApiClient {
     };
 
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split("\n\n");
-        buffer = events.pop() ?? "";
-
-        for (const ev of events) {
-          if (handleEvent(ev)) return;
-        }
-      }
-      // Flush any trailing event the stream ended without a blank line on
-      if (buffer.length > 0) {
-        if (handleEvent(buffer)) return;
+      for await (const ev of this._readSseChunks(reader, decoder, signal)) {
+        if (handleEvent(ev)) return;
       }
       onDone();
     } catch (err) {
       if ((err as Error)?.name !== "AbortError") {
         onError((err as Error)?.message || NETWORK_MESSAGE);
       }
+    }
+  }
+
+  /**
+   * Shared SSE transport reader. Splits the byte stream on the `\n\n` event
+   * boundary (so multi-line payloads survive), and flushes any trailing event
+   * the stream ended without a blank line on. Both `streamChat` (plain tokens)
+   * and `_readSseStream` (JSON objects) consume this; only the interpretation of
+   * each raw event differs.
+   */
+  private async *_readSseChunks(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    decoder: TextDecoder,
+    signal?: AbortSignal
+  ): AsyncGenerator<string> {
+    let buffer = "";
+    while (true) {
+      if (signal?.aborted) return;
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() ?? "";
+      for (const ev of events) {
+        yield ev.replace(/\r/g, "");
+      }
+    }
+    if (buffer.length > 0) {
+      yield buffer.replace(/\r/g, "");
     }
   }
 
@@ -343,21 +361,10 @@ class ApiClient {
     decoder: TextDecoder,
     signal?: AbortSignal
   ): AsyncGenerator<T> {
-    let buffer = "";
-    while (true) {
-      if (signal?.aborted) return;
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split("\n\n");
-      buffer = events.pop() ?? "";
-      for (const ev of events) {
-        const obj = this._parseSseData<T>(ev);
-        if (obj !== undefined) yield obj;
-      }
+    for await (const ev of this._readSseChunks(reader, decoder, signal)) {
+      const obj = this._parseSseData<T>(ev);
+      if (obj !== undefined) yield obj;
     }
-    const tail = this._parseSseData<T>(buffer);
-    if (tail !== undefined) yield tail;
   }
 
   /**

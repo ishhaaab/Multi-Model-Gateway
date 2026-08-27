@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ChevronDown,
   ImageIcon,
@@ -16,10 +16,8 @@ import { useTemplateStore } from "@/stores/template-store";
 import { useImageStore } from "@/stores/image-store";
 import { useWorkflowStore } from "@/stores/workflow-store";
 import { toast } from "@/stores/ui-store";
-import { useImageGeneration } from "@/hooks/use-image";
-import type { CompletedGeneration } from "@/hooks/use-image";
+import { useImageComposer } from "@/hooks/use-image-composer";
 import type { ImageResult } from "@/lib/types";
-import { imageApi } from "@/lib/api-endpoints";
 import { useResolvedImageUrl } from "@/lib/authed-image";
 import { cn, aspectRatioShort, formatRelativeTime, truncate } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
@@ -31,8 +29,6 @@ import { Spinner } from "@/components/ui/Spinner";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Modal } from "@/components/ui/Modal";
 import AuthedImage from "@/components/images/AuthedImage";
-
-const NEG_DEFAULT = "text, watermark, blurry, low quality";
 
 function ImageCard({
   image,
@@ -100,101 +96,33 @@ export default function ImagesPage() {
   const hasLoadedTemplates = useTemplateStore((s) => s.hasLoaded);
   const workflows = useWorkflowStore((s) => s.workflows);
 
-  const { generate, cancel, reset, isGenerating, status, images, rewrittenPrompt, error } =
-    useImageGeneration();
-
-  // "New Image" (left sidebar) bumps this nonce → clear the prompt + results.
-  const newImageNonce = useImageStore((s) => s.newImageNonce);
-  const initialNonce = useRef(newImageNonce);
+  const {
+    prompt, setPrompt,
+    negative, setNegative,
+    aspect, setAspect,
+    steps, setSteps,
+    cfg, setCfg,
+    templateId, setTemplateId,
+    workflowId, setWorkflowId,
+    batchSize, setBatchSize,
+    randomSeed, setRandomSeed,
+    seed, setSeed,
+    rewrite, setRewrite,
+    showAdvanced, setShowAdvanced,
+    aspectRatios, aspectLoading, aspectError, loadAspectRatios,
+    cancel, isGenerating, status, images, rewrittenPrompt, error,
+    handleGenerate,
+  } = useImageComposer();
 
   // Generation history lives in the store so the left sidebar can show it too.
   const history = useImageStore((s) => s.history);
-  const addImageHistory = useImageStore((s) => s.addImageHistory);
   const clearImageHistory = useImageStore((s) => s.clearImageHistory);
-
-  // aspect ratios — sourced from the backend (single source of truth)
-  const [aspectRatios, setAspectRatios] = useState<string[]>([]);
-  const [aspectLoading, setAspectLoading] = useState(true);
-  const [aspectError, setAspectError] = useState(false);
-
-  // form
-  const [prompt, setPrompt] = useState("");
-  const [negative, setNegative] = useState(NEG_DEFAULT);
-  const [aspect, setAspect] = useState<string | null>(null);
-  const [steps, setSteps] = useState(10);
-  const [cfg, setCfg] = useState(1.2);
-  const [templateId, setTemplateId] = useState<string>("");
-  const [workflowId, setWorkflowId] = useState<string>("");
-  const [batchSize, setBatchSize] = useState(1);
-  const [randomSeed, setRandomSeed] = useState(true);
-  const [seed, setSeed] = useState("");
-  const [rewrite, setRewrite] = useState(true);
-  const [showAdvanced, setShowAdvanced] = useState(true);
 
   const [fullscreen, setFullscreen] = useState<string | null>(null);
 
   useEffect(() => {
     if (!hasLoadedTemplates) void fetchTemplates();
   }, [hasLoadedTemplates, fetchTemplates]);
-
-  // Reset to a blank composer when "New Image" is clicked (skip the initial
-  // mount value, where the form is already fresh).
-  useEffect(() => {
-    if (newImageNonce === initialNonce.current) return;
-    setPrompt("");
-    reset();
-  }, [newImageNonce, reset]);
-
-  const loadAspectRatios = useCallback(async () => {
-    setAspectLoading(true);
-    setAspectError(false);
-    try {
-      const { aspect_ratios, default: def } = await imageApi.aspectRatios();
-      setAspectRatios(aspect_ratios);
-      // Default the selection to the backend default (unless the user already picked).
-      setAspect((cur) => cur ?? def ?? aspect_ratios[0] ?? null);
-    } catch {
-      setAspectError(true);
-    } finally {
-      setAspectLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadAspectRatios();
-  }, [loadAspectRatios]);
-
-  const onComplete = (result: CompletedGeneration) => {
-    addImageHistory({
-      promptId: result.promptId,
-      prompt: result.rewrittenPrompt,
-      images: result.images,
-      createdAt: Date.now(),
-    });
-  };
-
-  const handleGenerate = () => {
-    if (!prompt.trim()) {
-      toast.error("Enter a prompt first.");
-      return;
-    }
-    void generate(
-      {
-        prompt: prompt.trim(),
-        negative_prompt: negative.trim() || NEG_DEFAULT,
-        template_id: templateId || null,
-        workflow_id: workflowId || null,
-        steps,
-        cfg,
-        // Omit when unknown so the backend applies its own default.
-        ...(aspect ? { aspect_ratio: aspect } : {}),
-        batch_size: batchSize,
-        seed: randomSeed ? null : seed.trim() ? Number(seed) : null,
-        rewrite,
-      },
-      onComplete
-    );
-  };
 
   const templateOptions = [
     { value: "", label: "None (use default)" },

@@ -454,14 +454,24 @@ response shapes for the model detail screen:
 
 ## Critical files (web app → port from)
 - `frontend/src/lib/types.ts` — complete backend contract; ports verbatim.
-- `frontend/src/lib/api-client.ts:177-262,270-322` — SSE parsing logic to reimplement on
-  `react-native-sse`.
+- `frontend/src/lib/api-client.ts` — SSE: `streamChat` (plain tokens) + `streamEvents`/`_readSseStream`
+  (JSON objects) both consume the shared private `_readSseChunks` transport reader; reimplement the
+  two interpreters (not the transport) on `react-native-sse`.
 - `frontend/src/lib/api-client.ts:102-167` — 401-refresh-retry + coalescing; ports to RN `fetch`.
 - `frontend/src/hooks/use-chat.ts` + `use-agent.ts` + `use-research-job.ts` — three streaming
   hooks that merge into one mode-dispatching `use-chat.ts`.
 - `frontend/src/lib/authed-image.ts` — `resolveImageUrl()` + `useResolvedImageUrl()`
   (authed blob fetch + cache) and `frontend/src/components/images/AuthedImage.tsx` —
   the pattern the mobile app should follow for S3-compliant image rendering.
+
+## Design-practice cleanup (SSE transport + image composer)
+- `lib/api-client.ts` had two SSE transport readers (the `streamChat` inline loop and
+  `_readSseStream`). Extracted a shared private `_readSseChunks` generator for the `\n\n`
+  boundary split + tail flush; `streamChat` and `_readSseStream` keep only their event
+  interpreters. Chat token stream is unchanged.
+- Extracted the image-composer state (~13 `useState` + aspect-ratio loading + the "New Image"
+  nonce reset + `handleGenerate`/`onComplete`) out of `pages/images.tsx` into
+  `hooks/use-image-composer.ts`; the page is now a pure render.
 
 ## Assumptions
 - **`react-native-sse` is the SSE transport** (supports POST + custom headers). Fallback:

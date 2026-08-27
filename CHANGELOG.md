@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-27 — Design-practice cleanup (frontend SSE transport + image composer)
+
+- Frontend: `lib/api-client.ts` no longer has two SSE transport readers. A shared private `_readSseChunks` generator owns the `\n\n` boundary split + tail flush, and both `streamChat` (plain tokens) and `_readSseStream` (JSON objects) consume it — only the event interpreter differs. The chat token stream is unchanged.
+- Frontend: extracted the image-composer state (~13 `useState` + aspect-ratio loading + the "New Image" nonce reset + `handleGenerate`/`onComplete`) out of `pages/images.tsx` into a new `hooks/use-image-composer.ts`. The page is now a pure render that binds the hook's state to UI.
+
 ## 2026-08-27 — Design-practice cleanup (GGUF parser split out of fit_score)
 
 - Backend: the hand-rolled GGUF binary header walker (`_read_gguf_string`, `_read_gguf_value`, `_parse_gguf_header` plus `_GGUF_VALUE_FMT`/`_ARRAY_SKIPPED`/`_GGUF_SUPPORTED_VERSIONS`/`_GGUF_FILE_RE`/`_QUANT_RE`/`_SHARD_RE`) moved out of `services/fit_score.py` into a new pure `services/fit_score_gguf.py` module. `fit_score.py` re-exports it (including a `_parse_gguf_header` alias) so the rest of the app and tests are unchanged. This isolates the binary-format parsing domain from VRAM fit scoring and de-bloats the worst hotspot.
