@@ -507,6 +507,18 @@ The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 wo
   translates the domain `SuggestError` → 502. The response shape is unchanged, so the API
   contract is untouched. New `backend/tests/test_agent_suggest.py` covers the pure helpers.
 
+## Design-practice cleanup (GGUF parser split out of fit_score)
+
+- `services/fit_score.py` was the report's worst hotspot — a god file mixing VRAM fit scoring
+  with a hand-rolled GGUF binary header parser. The binary-format parsing is a different
+  domain (byte layout vs. VRAM math), so the walker (`_read_gguf_string`, `_read_gguf_value`,
+  `parse_gguf_header`) plus its constants moved into a new pure module
+  `services/fit_score_gguf.py`.
+- `fit_score.py` re-exports the walker (with a `_parse_gguf_header` alias) so the rest of the
+  app and the existing `test_hf_detail.py` references are unchanged. The walker is pure
+  (only `struct` + `gguf`, no I/O, no config), so it unit-tests in isolation — new
+  `backend/tests/test_fit_score_gguf.py` (12 cases).
+
 ## Reliability fixes implemented (R1 + R2)
 
 The agent-loop reliability pass from Phase 2, landed together.

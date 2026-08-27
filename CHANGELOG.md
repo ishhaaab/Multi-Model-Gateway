@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-27 — Design-practice cleanup (GGUF parser split out of fit_score)
+
+- Backend: the hand-rolled GGUF binary header walker (`_read_gguf_string`, `_read_gguf_value`, `_parse_gguf_header` plus `_GGUF_VALUE_FMT`/`_ARRAY_SKIPPED`/`_GGUF_SUPPORTED_VERSIONS`/`_GGUF_FILE_RE`/`_QUANT_RE`/`_SHARD_RE`) moved out of `services/fit_score.py` into a new pure `services/fit_score_gguf.py` module. `fit_score.py` re-exports it (including a `_parse_gguf_header` alias) so the rest of the app and tests are unchanged. This isolates the binary-format parsing domain from VRAM fit scoring and de-bloats the worst hotspot.
+- Tests: new `backend/tests/test_fit_score_gguf.py` (12 cases) covering the string/value walkers, array skipping, header parsing, and the value-format table.
+
 ## 2026-08-27 — Design-practice cleanup (Smart Suggest extracted to a service)
 
 - Backend: `Smart Suggest` (the ~200-line cloud→local LLM fallback chain) moved out of `routers/agents.py` into a new `services/agent_suggest.py` deep module. The router handler is now a thin `POST /agents/suggest` that calls `agent_suggest.suggest(goal, description, user_id, db)` and translates `SuggestError` → 502. The service raises a domain `SuggestError` (not `HTTPException`) on failure; the sugared response shape (`name`/`description`/`system_prompt`/`suggested_tools`/`suggested_model`) is unchanged.
