@@ -66,11 +66,12 @@ class AgentGuardTests(unittest.TestCase):
 
     def test_routing_helpers_present(self):
         try:
-            from app.services.router import resolve_role, ChatRequest
+            from app.services.provider_router import resolve_role
+            from app.services.router import ChatRequest
         except Exception as exc:  # noqa: BLE001
-            self.skipTest(f"router import failed: {exc}")
+            self.skipTest(f"provider_router import failed: {exc}")
         self.assertTrue(callable(resolve_role))
         req = ChatRequest(messages=[{"role": "user", "content": "debug my python"}])
-        self.assertEqual(resolve_role(req), "cloud")
+        self.assertEqual(resolve_role(text=req.messages[-1].content, provider_choice=req.provider, is_private=req.private, message_count=len(req.messages)), "cloud")
         req2 = ChatRequest(messages=[{"role": "user", "content": "hello"}])
-        self.assertIn(resolve_role(req2), ("local", "cloud"))
+        self.assertIn(resolve_role(text=req2.messages[-1].content, provider_choice=req2.provider, is_private=req2.private, message_count=len(req2.messages)), ("local", "cloud"))

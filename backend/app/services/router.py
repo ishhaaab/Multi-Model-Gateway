@@ -1,20 +1,9 @@
 from app.core.config import settings, get_openrouter_api_key
 from pydantic import BaseModel, Field
-from typing import List, Optional, Tuple
+from typing import List, Optional
 from openai import AsyncOpenAI
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from enum import Enum
-
-from app.core.exceptions import ForbiddenError, NotFoundError
-from app.models.providers import Provider as ProviderRow
-from app.services.provider_registry import (
-    ProviderConfigError,
-    get_default_provider,
-    row_to_provider,
-)
-from app.services.providers import LLMProvider, OpenAICompatProvider, OpenRouterProvider
 
 
 class Provider(str, Enum):
@@ -57,94 +46,3 @@ def get_openrouter_client():
         base_url="https://openrouter.ai/api/v1",
         api_key=key,
     )
-
-
-def resolve_role(request: ChatRequest) -> str:
-    """Pure routing heuristic: which role ("local" | "cloud") handles this
-    request, exactly mirroring the legacy match/case rules. No DB access, no
-    client construction."""
-    last_message = request.messages[-1].content.lower()
-    code = ["script", "code", "function", "debug", "bug", "python", "c++", "java", "javascript", "typescript"]
-    image = ["draw", "image", "picture", "screenshot", "imagine"]
-
-    if request.private:
-        return "local"                       # privacy
-    if request.provider == Provider.local:
-        return "local"                       # explicitly use local
-    if request.provider == Provider.openrouter:
-        return "cloud"                       # explicitly use openrouter
-    if any(k in last_message for k in code):
-        return "cloud"                       # for coding tasks we use openrouter model
-    if len(request.messages) > 80:
-        return "cloud"                       # for long tasks, use openrouter model
-
-    # i have to add comfyui provider for image gen using image list
-    return "local"
-
-
-async def _resolve_pinned_provider(request: ChatRequest, user_id: str, db: AsyncSession) -> Tuple[LLMProvider, str, str] | None:
-    """Try to resolve a pinned provider_id; returns None when no pin is set."""
-    if not request.provider_id:
-        return None
-    result = await db.execute(select(ProviderRow).where(ProviderRow.id == request.provider_id))
-    row = result.scalar_one_or_none()
-    if row is None:
-        raise NotFoundError(f"provider {request.provider_id} not found")
-    if str(row.user_id) != str(user_id):
-        raise ForbiddenError("unauthorised")
-    if request.model == "auto" and row.default_model is None:
-        raise ProviderConfigError(
-            f"provider '{row.name}' has no default model configured; set a default model or pass an explicit model"
-        )
-    provider = row_to_provider(row)
-    model = request.model if request.model != "auto" else row.default_model
-    return provider, model, row.role
-
-
-async def _resolve_default_provider_for_role(
-    request: ChatRequest, user_id: str, role: str, db: AsyncSession
-) -> Tuple[LLMProvider, str, str] | None:
-    """Try the user's default provider for the resolved role; None when absent."""
-    row = await get_default_provider(db, user_id, role)
-    if row is None:
-        return None
-    if request.model == "auto" and row.default_model is None:
-        raise ProviderConfigError(
-            f"provider '{row.name}' has no default model configured; set a default model or pass an explicit model"
-        )
-    provider = row_to_provider(row)
-    model = request.model if request.model != "auto" else row.default_model
-    return provider, model, role
-
-
-def _fallback_provider(
-    request: ChatRequest, role: str
-) -> Tuple[LLMProvider, str, str]:
-    """Legacy env-var fallback for when no provider row exists."""
-    if role == "local":
-        provider = OpenAICompatProvider(
-            base_url=settings.LM_URL,
-            api_key="LM-STUDIO",
-            default_model=settings.LM_CHAT_MODEL or settings.LM_DEFAULT_MODEL,
-        )
-        model = request.model if request.model != "auto" else provider.default_model
-        return provider, model, role
-    key = get_openrouter_api_key()
-    if not key:
-        raise RuntimeError("OpenRouter is not configured (no API key)")
-    provider = OpenRouterProvider(api_key=key, default_model=settings.OPENROUTER_DEFAULT_MODEL)
-    model = request.model if request.model != "auto" else provider.default_model
-    return provider, model, role
-
-
-async def get_provider(request: ChatRequest, user_id: str, db: AsyncSession) -> Tuple[LLMProvider, str, str]:
-    """Resolve (provider adapter, model, role) for a chat/agent request.
-
-    Delegates to ProviderRouter (#3) — the legacy chain is preserved here as a
-    thin shim for callers that still import from this module. New code should
-    import from app.services.provider_router.
-    """
-    from app.services.provider_router import ProviderRouter
-
-    r = await ProviderRouter().resolve(request, user_id, db)
-    return r.provider, r.model, r.role

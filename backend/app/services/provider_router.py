@@ -7,6 +7,11 @@ is pure and testable without a DB. Two depths: the router hides the fallback
 chain; the LLMProvider adapters hide wire differences. Two adapters justify each
 seam.
 
+This is the SINGLE entry point for provider resolution. The legacy
+`services/router.py::get_provider` shim and its duplicate `resolve_role` were
+removed; `routers/chat.py`, `services/agent/agent.py`, `routers/agents.py`, and
+Smart Suggest all call `ProviderRouter().resolve()` directly.
+
 Deletion test: deleting this scatters the pinned/default/fallback chain and
 heuristic keywords back into agent.py + chat.py + research.py + suggest.
 """

@@ -456,6 +456,19 @@ The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 wo
   `_resolveInside`); the stale import would re-raise instead of skipping on envs without
   asyncpg. Updated to the current symbol.
 
+## Design-practice cleanup (ProviderRouter single entry point)
+
+- Removed the legacy `services/router.py::get_provider` shim — a 10-line pass-through with
+  exactly one caller (`services/agent/agent.py`). `routers/chat.py` and `routers/agents.py`
+  already called `ProviderRouter().resolve()` directly, so `agent.py` was the lone straggler.
+  Now `ProviderRouter` is the single entry point for provider resolution.
+- Removed the dead duplicate `services/router.py::resolve_role` (zero callers). The pure
+  keyword heuristic lives only in `services/provider_router.py::resolve_role`; `router.py`
+  keeps the `Provider`/`ChatRequest`/`ChatMessage` facts and the client factories.
+- `test_routing.py` now tests `ProviderRouter.resolve` + `provider_router.resolve_role`
+  directly instead of mocking the removed legacy shim. Backward compatible — the agent chat
+  and plain chat request shapes are unchanged, so the API contract is untouched.
+
 ## Reliability fixes implemented (R1 + R2)
 
 The agent-loop reliability pass from Phase 2, landed together.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-27 — Design-practice cleanup (ProviderRouter single entry point)
+
+- Backend: removed the legacy `services/router.py` `get_provider` shim (a 10-line pass-through with one caller) and its dead duplicate `resolve_role` (zero callers). `ProviderRouter().resolve()` is now the single entry point for provider resolution; `services/agent/agent.py` calls it directly. `resolve_role` lives only in `services/provider_router.py` (pure, keyword-heuristic). `router.py` keeps the `Provider`/`ChatRequest`/`ChatMessage` facts and the client factories.
+- Tests: `test_routing.py` now exercises `ProviderRouter.resolve` + `provider_router.resolve_role` directly (was mocking the removed legacy shim). `test_agents.py` uses the `resolve_role` keyword signature.
+- Docs: `provider_router.py` module docstring notes it supersedes the shim.
+
 ## 2026-08-27 — Smart Suggest: cloud-then-local fallback + workspace test/de-nest
 
 - Backend: `POST /v1/agents/suggest` now tries OpenRouter with an ordered list of `:free` models first, then falls back to LM Studio/local — so a free-only OpenRouter key no longer surfaces a raw `502 "suggest generation failed: ... User not found."`. A 401/`User not found.` is detected as an auth error and falls through to local; only when both tiers fail does it return a 502 with a hint instead of the raw provider payload. `suggest_agent` de-nested 5→1 by extracting `_suggest_cloud`/`_suggest_local`/`_parse_suggest_json`/`_build_suggest_response`/`_cloud_candidates` to module level.

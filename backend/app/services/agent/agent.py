@@ -45,7 +45,8 @@ from app.services.convo import conversation, load_history, save_messages
 from app.services.memory import store_exchange_memories
 from app.services.memory_curation import enqueue_curation
 from app.services.memory_files import safe_build_memory_context
-from app.services.router import ChatRequest, get_provider
+from app.services.provider_router import ProviderRouter
+from app.services.router import ChatRequest
 from app.services.tools import registry
 
 logger = logging.getLogger(__name__)
@@ -287,7 +288,8 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
         else:
             allowed = await get_allowed_tools(user_id, db)
 
-        provider, model, _role = await get_provider(request, user_id, db)
+        resolved = await ProviderRouter().resolve(request, user_id, db)
+        provider, model, _role = resolved.provider, resolved.model, resolved.role
         is_cloud = getattr(provider, "is_cloud", False)
         resolved_provider = "openrouter" if is_cloud else "local"
         extra_sampling = {} if is_cloud else {
