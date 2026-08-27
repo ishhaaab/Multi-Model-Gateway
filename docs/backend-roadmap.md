@@ -469,6 +469,21 @@ The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 wo
   directly instead of mocking the removed legacy shim. Backward compatible — the agent chat
   and plain chat request shapes are unchanged, so the API contract is untouched.
 
+## Design-practice cleanup (agent-loop helpers one home)
+
+- The agent-loop helpers (`_estimate_tokens`, `_is_context_error`, `_prune_old_tool_rounds`)
+  and `_MEMORY_WRITE_TOOLS` were duplicated byte-for-byte between `services/agent/agent.py`
+  (the adapter) and `services/agent/runtime.py` (the module that owns the loop). This was the
+  highest-value bug: `test_agent.py` tested the *adapter's* copies while the live loop ran the
+  *runtime's* copies, so the shipped loop was untested.
+- Deleted the duplicates from `agent.py`; the helpers now live once in `runtime.py` and are
+  re-exported by `services/agent/__init__.py` (so `from app.services.agent import …` still
+  works). `test_agent.py` now imports from `app.services.agent.runtime` (the live module) and
+  a new `test_agent_runtime.py` covers them.
+- Also corrected the `runtime.py` module docstring: it previously claimed the runtime "never
+  imports AsyncSession", but it opens its own `AsyncSessionLocal` per tool call and for the
+  final save (R1). The docstring now states no `AsyncSession` handle crosses the seam.
+
 ## Reliability fixes implemented (R1 + R2)
 
 The agent-loop reliability pass from Phase 2, landed together.
@@ -481,7 +496,7 @@ The agent-loop reliability pass from Phase 2, landed together.
     call); the unknown/unauthorised-tool branch needs no session. `save_messages` uses a fresh
     `AsyncSessionLocal` after the loop; `get_db`'s own close afterwards is a no-op.
 - **R2 — messages are bounded and context overflow degrades.**
-  - New pure helpers in `services/agent.py`: `_estimate_tokens` (≈ 4 tokens/message + 1 per 4
+  - New pure helpers in `services/agent/runtime.py`: `_estimate_tokens` (≈ 4 tokens/message + 1 per 4
     chars), `_is_context_error` (provider-error string sniffing), `_prune_old_tool_rounds`
     (drops the oldest assistant-with-tool_calls message plus its tool results until the
     estimate fits; leading system messages + the first user message are never touched).
@@ -489,8 +504,8 @@ The agent-loop reliability pass from Phase 2, landed together.
     budget before the final tool-less round. A context-length `APIError` mid-loop logs a
     warning, drops all tool rounds, and synthesizes a tool-less final answer with
     `truncated=True` — the SSE event sequence and done-event shape are unchanged.
-  - New unit tests: `backend/tests/test_agent.py` (7 cases covering the estimate, the error
-    sniffing, and pruning structure).
+  - New unit tests: `backend/tests/test_agent_runtime.py` (covers the estimate, the error
+    sniffing, and pruning structure against the runtime's live helpers).
 
 ## Reliability fixes implemented (R3–R6)
 

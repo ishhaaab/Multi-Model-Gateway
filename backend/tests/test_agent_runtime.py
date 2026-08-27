@@ -1,11 +1,11 @@
-"""Unit tests for the R2 agent-loop helpers (services/agent/runtime.py).
+"""Unit tests for the AgentRuntime loop helpers (services/agent/runtime.py).
 
 Stdlib unittest only — no pytest dependency. Tests are offline (no DB, no
-network): _estimate_tokens / _is_context_error / _prune_old_tool_rounds are
-pure functions. They are imported from the runtime module (the one the live
-loop uses), not the adapter — so the tests cover the code that actually runs.
-If the module can't be imported in this environment (missing settings/secret
-deps), the whole suite skips cleanly.
+network): _estimate_tokens / _is_context_error / _prune_old_tool_rounds /
+_MEMORY_WRITE_TOOLS are pure. Imported from the runtime module — the one the
+live loop uses — so the tests cover the code that actually runs. If the module
+can't be imported in this environment (missing settings/secret deps), the whole
+suite skips cleanly.
 """
 import unittest
 
@@ -14,11 +14,13 @@ try:
         _estimate_tokens,
         _is_context_error,
         _prune_old_tool_rounds,
+        _MEMORY_WRITE_TOOLS,
     )
 except Exception as exc:  # noqa: BLE001 — env may lack required settings
     _estimate_tokens = None
     _is_context_error = None
     _prune_old_tool_rounds = None
+    _MEMORY_WRITE_TOOLS = None
     _IMPORT_ERROR = exc
 else:
     _IMPORT_ERROR = None
@@ -53,6 +55,11 @@ class EstimateTokensTests(unittest.TestCase):
         large = _estimate_tokens([{"role": "user", "content": "x" * 400}])
         self.assertGreater(large, small)
 
+    def test_content_is_coerced_and_blank_counts_overhead(self):
+        # None content -> "None" string; empty string -> 4 tokens of overhead
+        self.assertEqual(_estimate_tokens([{"role": "user"}]), 4)
+        self.assertGreater(_estimate_tokens([{"role": "user", "content": "abcdefgh"}]), 4)
+
 
 class IsContextErrorTests(unittest.TestCase):
     @classmethod
@@ -62,17 +69,20 @@ class IsContextErrorTests(unittest.TestCase):
                 f"app.services.agent.runtime import failed in this env: {_IMPORT_ERROR}"
             )
 
-    def test_context_indicators(self):
-        for message in (
-            "This model's maximum context length is 128000 tokens",
-            "Requested tokens exceed the context window",
-            "too many tokens in the prompt",
+    def test_context_indicators_are_flagged(self):
+        for msg in (
+            "This model's maximum context length is 8192 tokens",
+            "Error: the prompt is too long",
+            "context_window_exceeded",
+            "Request too large for token limit",
         ):
-            self.assertTrue(_is_context_error(Exception(message)), message)
+            with self.subTest(msg=msg):
+                self.assertTrue(_is_context_error(Exception(msg)))
 
-    def test_non_context_errors(self):
-        for message in ("connection reset", "rate limit", ""):
-            self.assertFalse(_is_context_error(Exception(message)), message)
+    def test_non_context_errors_are_not_flagged(self):
+        for msg in ("rate limit exceeded", "connection reset", "invalid api key", "5xx server error"):
+            with self.subTest(msg=msg):
+                self.assertFalse(_is_context_error(Exception(msg)))
 
 
 class PruneOldToolRoundsTests(unittest.TestCase):
@@ -84,21 +94,20 @@ class PruneOldToolRoundsTests(unittest.TestCase):
             )
 
     def setUp(self):
-        # every message has 1 char of content → exactly 4 estimated tokens each
-        self.messages = (
-            [{"role": "system", "content": "s"},
-             {"role": "user", "content": "u"}]
-            + _tool_round("a1", "t1", "t2")
-            + _tool_round("a2", "t3")
-        )
+        # essential prefix (system + user) = 8 tokens; round1 (assistant+2 tool) = 12;
+        # round2 (assistant+2 tool) = 12; then a plain assistant answer = 4.
+        self.messages = [
+            {"role": "system", "content": "sys"},          # 4
+            {"role": "user", "content": "u"},              # 4
+            *_tool_round("a1", "r1", "r2"),                # 12
+            *_tool_round("a2", "r3", "r4"),                # 12
+            {"role": "assistant", "content": "final"},     # 4
+        ]
 
     def assert_well_formed(self, messages):
-        """Rounds stay intact: every tool message directly follows the
-        assistant that made the call, and every assistant-with-tool_calls is
-        followed by its tool results — no orphaned halves."""
+        """Every tool result must immediately follow its assistant tool_calls."""
         for i, m in enumerate(messages):
             if m.get("role") == "tool":
-                self.assertGreater(i, 0)
                 prev = messages[i - 1]
                 self.assertEqual(prev.get("role"), "assistant")
                 self.assertIn("tool_calls", prev)
@@ -106,9 +115,8 @@ class PruneOldToolRoundsTests(unittest.TestCase):
                 self.assertLess(i + 1, len(messages))
                 self.assertEqual(messages[i + 1].get("role"), "tool")
 
-    def test_prunes_oldest_round_only(self):
-        # total = 7 * 4 = 28 tokens; essential + round2 = 8 + 8 = 16
-        # → only the oldest round (12 tokens) goes
+    def test_prunes_in_place_and_returns_same_list(self):
+        # total = 8 + 12 + 12 + 4 = 36. Budget 16 → only round1 (12) goes.
         pruned = _prune_old_tool_rounds(self.messages, 16)
         self.assertIs(pruned, self.messages, "prunes in place")
         self.assertEqual([m["role"] for m in pruned], ["system", "user", "assistant", "tool"])
@@ -118,12 +126,33 @@ class PruneOldToolRoundsTests(unittest.TestCase):
         before = [dict(m) for m in self.messages]
         pruned = _prune_old_tool_rounds(self.messages, 10_000)
         self.assertEqual(pruned, before)
-        self.assertEqual(len(pruned), 7)
+        self.assertEqual(len(pruned), len(self.messages))
 
     def test_drop_all_keeps_essential_only(self):
         pruned = _prune_old_tool_rounds(self.messages, 5, drop_all=True)
         self.assertEqual([m["role"] for m in pruned], ["system", "user"])
         self.assert_well_formed(pruned)
+
+    def test_drops_too_big_oldest_round_is_not_cut(self):
+        # If the essential prefix alone exceeds budget, prune should NOT delete it.
+        tiny = self.messages[:2]
+        pruned = _prune_old_tool_rounds(tiny, 1)
+        self.assertEqual([m["role"] for m in pruned], ["system", "user"])
+
+
+class MemoryWriteToolsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if _MEMORY_WRITE_TOOLS is None:
+            raise unittest.SkipTest(
+                f"app.services.agent.runtime import failed in this env: {_IMPORT_ERROR}"
+            )
+
+    def test_members_are_the_memory_mutators(self):
+        self.assertEqual(
+            tuple(_MEMORY_WRITE_TOOLS),
+            ("memory_write", "memory_str_replace", "memory_append", "memory_delete"),
+        )
 
 
 if __name__ == "__main__":

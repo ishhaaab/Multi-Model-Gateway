@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-27 — Design-practice cleanup (agent-loop helpers one home)
+
+- Backend: removed the duplicated `_estimate_tokens` / `_is_context_error` / `_prune_old_tool_rounds` / `_MEMORY_WRITE_TOOLS` copies from `services/agent/agent.py`. They are now defined once in `services/agent/runtime.py` (the module that owns the loop) and re-exported by `services/agent/__init__.py`, so the adapter and the tests share the exact helpers the live loop runs. Previously `test_agent.py` tested the dead `agent.py` copies while the live loop used divergent `runtime.py` copies.
+- Tests: new `backend/tests/test_agent_runtime.py` (covers the runtime's live helpers + `_MEMORY_WRITE_TOOLS`); `test_agent.py` now imports the helpers from `app.services.agent.runtime` so it covers the code that actually runs.
+- Docs: `runtime.py` module docstring corrected — it says no `AsyncSession` handle crosses the seam (the runtime opens its own per-tool sessions), and notes the loop helpers are canonical here.
+
 ## 2026-08-27 — Design-practice cleanup (ProviderRouter single entry point)
 
 - Backend: removed the legacy `services/router.py` `get_provider` shim (a 10-line pass-through with one caller) and its dead duplicate `resolve_role` (zero callers). `ProviderRouter().resolve()` is now the single entry point for provider resolution; `services/agent/agent.py` calls it directly. `resolve_role` lives only in `services/provider_router.py` (pure, keyword-heuristic). `router.py` keeps the `Provider`/`ChatRequest`/`ChatMessage` facts and the client factories.

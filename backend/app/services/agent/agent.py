@@ -51,76 +51,15 @@ from app.services.tools import registry
 
 logger = logging.getLogger(__name__)
 
-# M2: memory tools that mutate the file store — their paths are captured so the
-# background curation pass skips them (it must never clobber an in-turn write).
-_MEMORY_WRITE_TOOLS = ("memory_write", "memory_str_replace", "memory_append", "memory_delete")
+# The loop helpers (_estimate_tokens, _is_context_error, _prune_old_tool_rounds)
+# and _MEMORY_WRITE_TOOLS live once in runtime.py — the module that owns the
+# loop. This adapter shares the exact helpers the runtime uses via the package
+# re-exports in __init__.py; the live loop is never tested against a divergent
+# copy.
 
 
 def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-
-
-def _estimate_tokens(messages: list) -> int:
-    """Rough token estimate for a message list: 4 tokens of overhead per
-    message plus one token per ~4 characters of content. Used to keep the
-    agent payload inside the model's context window (R2)."""
-    total = 0
-    for m in messages:
-        content = str(m.get("content") or "")
-        total += len(content) // 4 + 4
-    return total
-
-
-_CONTEXT_ERROR_HINTS = (
-    "context_length",
-    "context window",
-    "maximum context",
-    "too many tokens",
-    "token limit",
-    "input is too long",
-    "context overflow",
-    "prompt is too long",
-    "context length",
-)
-
-
-def _is_context_error(e: BaseException) -> bool:
-    """True when the provider error reads like the prompt outgrew the model's
-    context window, as opposed to a transient network/rate-limit failure."""
-    text = str(e).lower()
-    return any(hint in text for hint in _CONTEXT_ERROR_HINTS)
-
-
-def _prune_old_tool_rounds(messages: list, max_tokens: int, drop_all: bool = False) -> list:
-    """Drop the oldest tool-call rounds until the estimate fits max_tokens.
-
-    The essential prefix — leading system messages plus the first user
-    message — is never touched. A round's tool results die with the assistant
-    message that made the calls, so the "tool follows the assistant that
-    called it" API invariant holds for whatever survives. Mutates and returns
-    the list."""
-    essential_end = 0
-    for msg in messages:
-        if msg.get("role") in ("system", "user"):
-            essential_end += 1
-            if msg.get("role") == "user":
-                break
-        else:
-            break
-
-    while drop_all or _estimate_tokens(messages) > max_tokens:
-        victim = None
-        for i in range(essential_end, len(messages)):
-            if "tool_calls" in messages[i]:
-                victim = i
-                break
-        if victim is None:
-            break
-        end = victim + 1
-        while end < len(messages) and messages[end].get("role") == "tool":
-            end += 1
-        del messages[victim:end]
-    return messages
 
 
 async def get_allowed_tools(user_id: str, db: AsyncSession) -> list[registry.Tool]:

@@ -3,7 +3,14 @@
 External seam: one method on one class — `run(ctx) → AsyncIterable[AgentEvent]`
 where AgentEvent is a typed dict. Callers cross this seam only; they inject
 the LLMProvider adapter, the allowed-tool view, and the already-built message
-list. No DB handle crosses the seam — the runtime never imports AsyncSession.
+list. No `AsyncSession` handle crosses the seam — the runtime never receives a
+session from the caller; it opens its own short-lived `AsyncSessionLocal` per
+tool call and for the final save (R1).
+
+The loop helpers (`_estimate_tokens`, `_is_context_error`, `_prune_old_tool_rounds`)
+and `_MEMORY_WRITE_TOOLS` are defined HERE — the module that owns the loop — and
+re-exported by `__init__.py`, so the adapter (`agent.py`) and the tests share
+the exact code the loop runs.
 
 Two adapters justify the seam: the prod LLMProvider (OpenAI/compat, OpenRouter)
 and an in-memory fake used by `tests/test_agent_runtime.py`. The deletion test
