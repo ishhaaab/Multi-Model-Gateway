@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-27 — Test coverage: sandbox seam (T3 execution boundary)
+
+- Tests: new `backend/tests/test_sandbox.py` (13 cases) covering the Sandbox seam — the `Sandbox` Protocol / `ExecResult` dataclass, `MockSandbox` (echo + fail-keyword + truncation, never touches the filesystem), `HttpSandbox` (POST-to-`/exec` body mapping, timeout → exit 124, HTTP error → exit 1, via a stubbed httpx client), and `get_sandbox()` backend selection (mock when disabled/no URL, HTTP when enabled+URL set).
+
 ## 2026-08-27 — Design-practice cleanup (frontend SSE transport + image composer)
 
 - Frontend: `lib/api-client.ts` no longer has two SSE transport readers. A shared private `_readSseChunks` generator owns the `\n\n` boundary split + tail flush, and both `streamChat` (plain tokens) and `_readSseStream` (JSON objects) consume it — only the event interpreter differs. The chat token stream is unchanged.

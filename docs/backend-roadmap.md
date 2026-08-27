@@ -519,6 +519,20 @@ The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 wo
   (only `struct` + `gguf`, no I/O, no config), so it unit-tests in isolation — new
   `backend/tests/test_fit_score_gguf.py` (12 cases).
 
+## Test coverage: sandbox seam (T3 execution boundary)
+
+- `services/sandbox/*` (protocol, mock, http, factory) had zero tests despite being the
+  execution seam behind the whole T3 code-execution story. New
+  `backend/tests/test_sandbox.py` (13 cases) covers:
+  - `ExecResult` dataclass defaults + fields, and that both adapters implement the same
+    `exec` surface (the `Sandbox` Protocol is a real seam here).
+  - `MockSandbox` — echoes command + workdir, never touches the filesystem, `fail` keyword →
+    exit 1, long output truncated by `TOOL_RESULT_MAX_CHARS`.
+  - `HttpSandbox` — POST body carries cmd/workdir/user_id/agent_id and maps the response,
+    `httpx.TimeoutException → exit 124`, non-2xx → exit 1 (stubbed httpx client, no network).
+  - `get_sandbox()` selection — Mock when `ENABLE_CODE_EXECUTION` is off or `SANDBOX_URL` is
+    empty; Http when both are set.
+
 ## Reliability fixes implemented (R1 + R2)
 
 The agent-loop reliability pass from Phase 2, landed together.
