@@ -59,6 +59,46 @@ def _validate_allowed_tools(tools: list[str] | None) -> list[str]:
     return tools
 
 
+async def _load_agent(db: AsyncSession, agent_id: UUID) -> Agent | None:
+    """Fetch an agent row without any ownership check; None when it doesn't exist."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    return result.scalar_one_or_none()
+
+
+async def _get_owned_agent(db: AsyncSession, agent_id: UUID, user_id: str) -> Agent:
+    """Owner-only lookup for mutation routes (update/delete/publish).
+
+    404 when the agent doesn't exist; 403 when it belongs to someone else. This
+    is the repo's 404-vs-403 ownership convention — the workspace routes use
+    `_get_workspace_agent` instead, which also allows installers/public agents.
+    """
+    agent = await _load_agent(db, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if str(agent.user_id) != str(user_id):
+        raise HTTPException(status_code=403, detail="Unauthorised")
+    return agent
+
+
+async def _get_workspace_agent(db: AsyncSession, agent_id: UUID, user_id: str) -> Agent:
+    """Lookup for workspace routes: owner, an installer, or a public agent.
+
+    404 when the agent doesn't exist; 403 when the user is neither the owner nor
+    an installer and the agent is not public. The installer-eligibility check
+    mirrors `_resolve_agent` in services/agent/agent.py.
+    """
+    agent = await _load_agent(db, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if str(agent.user_id) != str(user_id):
+        inst = await db.execute(
+            select(AgentInstall).where(AgentInstall.user_id == user_id, AgentInstall.agent_id == agent_id)
+        )
+        if inst.scalar_one_or_none() is None and not agent.is_public:
+            raise HTTPException(status_code=403, detail="Unauthorised")
+    return agent
+
+
 @router.post("/agents", status_code=201)
 async def create_agent(
     body: AgentCreate,
@@ -365,12 +405,7 @@ async def update_agent(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    if str(agent.user_id) != str(user_id):
-        raise HTTPException(status_code=403, detail="Unauthorised")
+    agent = await _get_owned_agent(db, agent_id, user_id)
     data = body.model_dump(exclude_unset=True)
     if "allowed_tools" in data:
         data["allowed_tools"] = _validate_allowed_tools(data["allowed_tools"])
@@ -387,12 +422,7 @@ async def delete_agent(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    if str(agent.user_id) != str(user_id):
-        raise HTTPException(status_code=403, detail="Unauthorised")
+    agent = await _get_owned_agent(db, agent_id, user_id)
     await db.delete(agent)
     await db.commit()
     return {"detail": "Agent deleted"}
@@ -405,12 +435,7 @@ async def publish_agent(
     user_id: str = Depends(get_current_user),
 ):
     """Owner publishes a new version; installers see banner until they upgrade."""
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    if str(agent.user_id) != str(user_id):
-        raise HTTPException(status_code=403, detail="Unauthorised")
+    agent = await _get_owned_agent(db, agent_id, user_id)
     if not agent.is_public:
         raise HTTPException(status_code=422, detail="only public agents can be published")
     agent.version = int(agent.version) + 1
@@ -477,14 +502,7 @@ async def workspace_files(
 ):
     from app.services.workspace.store import get_workspace_store
 
-    ag = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = ag.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    if str(agent.user_id) != str(user_id):
-        inst = await db.execute(select(AgentInstall).where(AgentInstall.user_id == user_id, AgentInstall.agent_id == agent_id))
-        if inst.scalar_one_or_none() is None and not agent.is_public:
-            raise HTTPException(status_code=403, detail="Unauthorised")
+    await _get_workspace_agent(db, agent_id, user_id)
     store = get_workspace_store()
     files = store.list_files(str(user_id), str(agent_id), path)
     return {"files": files}
@@ -499,14 +517,7 @@ async def workspace_file(
 ):
     from app.services.workspace.store import get_workspace_store
 
-    ag = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = ag.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    if str(agent.user_id) != str(user_id):
-        inst = await db.execute(select(AgentInstall).where(AgentInstall.user_id == user_id, AgentInstall.agent_id == agent_id))
-        if inst.scalar_one_or_none() is None and not agent.is_public:
-            raise HTTPException(status_code=403, detail="Unauthorised")
+    await _get_workspace_agent(db, agent_id, user_id)
     store = get_workspace_store()
     return store.read_file(str(user_id), str(agent_id), path)
 
@@ -521,14 +532,7 @@ async def workspace_edits(
 ):
     from app.models.file_edits import FileEdit
 
-    ag = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = ag.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    if str(agent.user_id) != str(user_id):
-        inst = await db.execute(select(AgentInstall).where(AgentInstall.user_id == user_id, AgentInstall.agent_id == agent_id))
-        if inst.scalar_one_or_none() is None and not agent.is_public:
-            raise HTTPException(status_code=403, detail="Unauthorised")
+    await _get_workspace_agent(db, agent_id, user_id)
     q = select(FileEdit).where(FileEdit.user_id == user_id, FileEdit.agent_id == agent_id).order_by(FileEdit.created_at.desc())
     if limit is not None:
         q = q.limit(limit).offset(offset)
@@ -549,13 +553,6 @@ async def workspace_undo(
 ):
     from app.services.workspace.store import get_workspace_store
 
-    ag = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = ag.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    if str(agent.user_id) != str(user_id):
-        inst = await db.execute(select(AgentInstall).where(AgentInstall.user_id == user_id, AgentInstall.agent_id == agent_id))
-        if inst.scalar_one_or_none() is None and not agent.is_public:
-            raise HTTPException(status_code=403, detail="Unauthorised")
+    await _get_workspace_agent(db, agent_id, user_id)
     store = get_workspace_store()
     return await store.undo(str(user_id), str(agent_id), body.edit_id, db)

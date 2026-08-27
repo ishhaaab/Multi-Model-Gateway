@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-27 — Design-practice cleanup (one agent-ownership helper)
+
+- Backend: `routers/agents.py` re-ran the agent-ownership + install-eligibility query inline in 6 routes. Added two module-level helpers — `_get_owned_agent` (404 missing / 403 not-owner; used by update/delete/publish) and `_get_workspace_agent` (owner, installer, or public agent; used by the 4 workspace routes) — so the ownership policy lives once and matches the repo's 404-vs-403 convention.
+
 ## 2026-08-27 — Design-practice cleanup (agent-loop helpers one home)
 
 - Backend: removed the duplicated `_estimate_tokens` / `_is_context_error` / `_prune_old_tool_rounds` / `_MEMORY_WRITE_TOOLS` copies from `services/agent/agent.py`. They are now defined once in `services/agent/runtime.py` (the module that owns the loop) and re-exported by `services/agent/__init__.py`, so the adapter and the tests share the exact helpers the live loop runs. Previously `test_agent.py` tested the dead `agent.py` copies while the live loop used divergent `runtime.py` copies.

@@ -484,6 +484,18 @@ The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 wo
   imports AsyncSession", but it opens its own `AsyncSessionLocal` per tool call and for the
   final save (R1). The docstring now states no `AsyncSession` handle crosses the seam.
 
+## Design-practice cleanup (one agent-ownership helper)
+
+- `routers/agents.py` repeated the agent-ownership + install-eligibility query (select Agent →
+  404 missing → 403 not-owner) inline in six routes. Added two module-level helpers so the
+  ownership policy lives once and matches the repo's 404-vs-403 convention:
+  - `_get_owned_agent(db, agent_id, user_id)` — owner-only lookup (404 missing, 403 not-owner);
+    used by `update_agent`, `delete_agent`, `publish_agent`.
+  - `_get_workspace_agent(db, agent_id, user_id)` — allows the owner, an installer, or a public
+    agent; used by the four workspace routes (files / file / edits / undo). The
+    installer-eligibility check mirrors `_resolve_agent` in `services/agent/agent.py`.
+  - `_load_agent(db, agent_id)` — a bare fetch without any ownership check.
+
 ## Reliability fixes implemented (R1 + R2)
 
 The agent-loop reliability pass from Phase 2, landed together.
