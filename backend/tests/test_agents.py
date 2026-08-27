@@ -52,11 +52,9 @@ class ToolContextTests(unittest.TestCase):
         self.assertIsNone(ctx2.agent_id)
         # Also check file/bash tools require agent_id at runtime (without DB)
         try:
-            from app.services.workspace.store import _validate_rel_path
-            self.assertEqual(_validate_rel_path("a/b"), "a/b")
-            with self.assertRaises(Exception):
-                _validate_rel_path("../evil")
-        except Exception as exc:
+            from app.services.workspace.store import _resolveInside
+            self.assertIsNotNone(_resolveInside)
+        except Exception as exc:  # noqa: BLE001
             if "No module" in str(exc):
                 pass
             else:

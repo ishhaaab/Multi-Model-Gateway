@@ -438,6 +438,24 @@ The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 wo
   missing — never overwriting a value the operator set deliberately. Both are idempotent:
   re-running changes nothing when the keys already exist.
 
+## Security/correctness fixes implemented (workspace store)
+
+- **`AppError(status_code=...)` now works.** `services/workspace/store.py` raised
+  `AppError(status_code=422, detail=...)` in 27 places (the single path-security seam from
+  ADR-0002/0003), but `core/exceptions.py::AppError.__init__` only accepted `detail` — so
+  every rejection (bad `..` segment, absolute path, control char, symlink escape, quota,
+  hash mismatch) raised `TypeError` at the boundary, which mapped to a **500** instead of the
+  intended 422/404/413/409. `AppError` now takes an optional `status_code` keyword
+  (backward compatible: positional `detail` and subclass `status_code` both still work).
+- **Workspace store now has tests.** New `backend/tests/test_workspace_store.py` (15 cases)
+  covers `_resolveInside` (the 422 seam: absolute / `..` / control-char / escape rejection,
+  valid-relative + `.` acceptance), `_line_hash`/`_file_hashes`, and the write → git-commit →
+  `file_edits` audit → undo-by-`commit_sha` pipeline. Tests are offline (stub `app.db` only
+  during import, then restore it) so sibling test modules are unaffected.
+- **Test hygiene:** `test_agents.py` referenced the pre-refactor `_validate_rel_path` (now
+  `_resolveInside`); the stale import would re-raise instead of skipping on envs without
+  asyncpg. Updated to the current symbol.
+
 ## Reliability fixes implemented (R1 + R2)
 
 The agent-loop reliability pass from Phase 2, landed together.
