@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-28 — Sandbox: kill the whole process group on timeout (no orphaned grandchildren)
+
+- `sandbox/app.py::exec_cmd` now runs bash with `start_new_session=True` and kills the **entire process group** on timeout (`os.killpg(proc.pid, 9)`) instead of just timing out. Previously `subprocess.run(timeout=30)` raised `TimeoutExpired` (→ 500) and orphaned detached grandchildren like `sleep 1000 &`, which kept running and consuming quota/CPU after the request returned. Also replaced the odd `os.getpgid(0)` no-op with a guarded `killpg(proc.pid, 9)`; a `Popen` launch failure now returns a bounded `exit_code=1` error string instead of a 500. Note: the sandbox is a separate Linux container not covered by the backend test discovery — this change is verified by inspection (no docker on this host).
+
 ## 2026-08-28 — Agent adapter de-duplication (D4): one `_execute_tool`, no divergent copy
 
 - **Deleted a dead, divergent copy of `_execute_tool` in `services/agent/agent.py`.** The live loop (runtime.py) already owned `_execute_tool` and had the F11 fix (generic error strings, no internal-topology leak). But the adapter kept a second copy that was never called at runtime — yet re-echoed exception text (`f"...failed: {e}"`). This is the exact no-locality failure the report flagged: the F11 fix landed in one of two copies. The dead copy is gone; `_execute_tool` lives only in `runtime.py` and is imported by the tests from there. The test now asserts the **generic** message (`"Error: tool 'boom' failed"`, not `...failed: kaboom`), and cleans up the adapter's now-unused `asyncio`/`time`/`ToolPermission`-accrued imports.

@@ -62,13 +62,39 @@ async def exec_cmd(body: ExecRequest, request: Request):
     # Egress is NOT allowlisted by this app (the old comment claimed an
     # allowlist that never existed — sweep H2). Any enforcement would be
     # network-level (compose networks / firewall), not string matching on cmd.
-    proc = subprocess.run(
-        ["bash", "-lc", body.cmd],
-        cwd=str(workdir),
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    stdout = proc.stdout[:8000]
-    stderr = proc.stderr[:2000]
-    return {"stdout": stdout, "stderr": stderr, "exit_code": proc.returncode, "truncated": len(proc.stdout) > 8000}
+    #
+    # start_new_session=True puts bash in its own process group so a timeout
+    # kills the WHOLE group (detached grandchildren like `sleep 1000 &` don't
+    # survive the parent's death). os.killpg(-pid, SIGKILL) targets that group.
+    # Without it, TimeoutExpired orphaned grandchildren and returned a 500.
+    try:
+        proc = subprocess.Popen(
+            ["bash", "-lc", body.cmd],
+            cwd=str(workdir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        return {"stdout": "", "stderr": f"sandbox launch error: {exc}",
+                "exit_code": 1, "truncated": False}
+    try:
+        stdout, stderr = proc.communicate(timeout=30)
+    except subprocess.TimeoutExpired:
+        # bash is in its own session/group (start_new_session), so killing the
+        # group by pid kills the parent AND any detached grandchildren.
+        try:
+            os.killpg(proc.pid, 9)
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            stdout, stderr = proc.communicate(timeout=2)
+        except (subprocess.TimeoutExpired, ValueError):
+            stdout, stderr = "", ""
+        return {"stdout": "", "stderr": "sandbox command timed out",
+                "exit_code": 124, "truncated": False}
+    stdout = (stdout or "")[:8000]
+    stderr = (stderr or "")[:2000]
+    return {"stdout": stdout, "stderr": stderr, "exit_code": proc.returncode,
+            "truncated": len(stdout) > 8000}

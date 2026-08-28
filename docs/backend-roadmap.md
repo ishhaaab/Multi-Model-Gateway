@@ -455,7 +455,11 @@ Two-audit sweep of the agent's host-impact surface. Fixed in this commit; OPEN i
 - **F1/C2 (CRITICAL): bash is not confined to the caller's workspace** — the `workspaces` volume holds ALL users; `bash -lc` can read/write every one (`sandbox/app.py:26-44`). Fix shape: per-exec mount namespace exposing only `/workspaces/{user}/{agent}`, or per-user volumes.
 - **F9 (HIGH): bash bypasses the workspace disk quota** (`store.py` quota only gates file-tool writes; `.git` excluded from `du`) — host-disk exhaustion. Fix: post-exec `du` enforcement + count `.git`.
 - **F8 (LOW-MED): read/write use unresolved paths; `read_file` runs without the workspace lock** — symlink-swap race with bash. Fix: `O_NOFOLLOW`, lock reads.
-- Sandbox `subprocess.run` timeout doesn't kill detached grandchildren (`sleep 1000 &`); `TimeoutExpired` unhandled → 500. Fix: `start_new_session=True` + process-group kill.
+- Sandbox network egress is still unrestricted (compose claim corrected; real enforcement needs network policy).
+
+## Sandbox timeout hardening (2026-08-28)
+
+- **`sandbox/app.py::exec_cmd` now kills the whole process group on timeout.** Ran bash with `start_new_session=True`; on `TimeoutExpired` it `os.killpg(proc.pid, 9)`s the group so detached grandchildren (`sleep 1000 &`) don't survive the parent's death. Previously `subprocess.run(timeout=30)` raised `TimeoutExpired` (→ 500) and orphaned grandchildren that kept consuming quota/CPU. A `Popen` launch failure now returns a bounded error string rather than a 500. Verified by inspection only (sandbox is a separate Linux container; no docker on this host).
 
 ## Agent adapter de-duplication (D4, 2026-08-28)
 
