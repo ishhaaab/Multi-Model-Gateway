@@ -1,6 +1,7 @@
 import type { ChatRequest } from "./types";
 import { useAuthStore } from "@/stores/auth-store";
 import { getDeviceId } from "@/lib/device-id";
+import { interpretChatFrame, parseSseJson } from "./sse-events";
 
 export class ApiError extends Error {
   statusCode: number;
@@ -106,40 +107,69 @@ class ApiClient {
     }
   }
 
-  /** Core JSON request with one transparent token-refresh + retry on 401. */
-  async request<T>(
+  /**
+   * Authenticated fetch with ONE transparent token-refresh + retry on 401.
+   *
+   * This is the single policy for recovering an expired session — both JSON
+   * request() and fetchBlob() go through it, so they can't drift apart.
+   *
+   * A 401 that survives (refresh failed, no refresh token, or the retried
+   * request still 401s) means the session is genuinely dead. We only trigger
+   * onAuthFailure() when we were actually acting as an authenticated user
+   * (an auth header had been attached) — anonymous calls like login send no
+   * token, and their 401 is "wrong credentials", not session expiry.
+   *
+   * Non-ok responses are NOT classified here; callers interpret the status.
+   */
+  private async authFetch(
+    url: string,
     method: string,
-    path: string,
-    body?: unknown,
-    options?: { stream?: boolean; signal?: AbortSignal }
-  ): Promise<T> {
-    const url = this.fullUrl(path);
-    const stream = options?.stream ?? false;
+    body: unknown,
+    stream: boolean,
+    signal?: AbortSignal
+  ): Promise<Response> {
+    const hadToken = Boolean(this.getAccessToken());
     let headers = this.buildHeaders(body, stream);
 
-    let response = await this.rawFetch(url, method, headers, body, options?.signal);
+    let response = await this.rawFetch(url, method, headers, body, signal);
 
     if (response.status === 401 && this.getRefreshToken()) {
       const refreshed = await this.tryRefreshToken();
       if (refreshed) {
         headers = this.buildHeaders(body, stream);
-        response = await this.rawFetch(url, method, headers, body, options?.signal);
-      } else {
-        this.onAuthFailure();
-        throw new ApiError(401, "Session expired. Please log in again.");
+        response = await this.rawFetch(url, method, headers, body, signal);
       }
     }
 
-    if (!response.ok) {
-      const error = await response
-        .json()
-        .catch(() => ({ detail: "Request failed" }));
-      throw new ApiError(response.status, error.detail || "Request failed");
+    if (response.status === 401 && hadToken) {
+      this.onAuthFailure();
+      throw new ApiError(401, "Session expired. Please log in again.");
     }
 
-    if (stream) {
-      return response as unknown as T;
-    }
+    return response;
+  }
+
+  /** Turn a non-ok response into an ApiError with the backend's detail. */
+  private async parseErrorResponse(response: Response): Promise<ApiError> {
+    const error = await response.json().catch(() => ({ detail: "Request failed" }));
+    return new ApiError(response.status, error.detail || "Request failed");
+  }
+
+  /** Core JSON request with one transparent token-refresh + retry on 401. */
+  async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal
+  ): Promise<T> {
+    const response = await this.authFetch(
+      this.fullUrl(path),
+      method,
+      body,
+      false,
+      signal
+    );
+    if (!response.ok) throw await this.parseErrorResponse(response);
 
     // 204 / empty body guard
     const text = await response.text();
@@ -151,47 +181,21 @@ class ApiClient {
    *
    * `<img src>` can't send headers, so the backend's relative `/v1/images/file?`
    * URLs are fetched here and rendered via blob URLs. Mirrors request()'s
-   * 401-refresh-retry so expired sessions recover transparently, but treats
-   * every 401 as an auth failure — with no refresh token there's nothing to
-   * recover from, so we sign out instead of falling through as a plain error.
+   * 401-refresh-retry via the shared authFetch, so expired sessions recover
+   * transparently — and a session that can't be recovered signs the user out.
    */
   async fetchBlob(
     path: string,
     signal?: AbortSignal
   ): Promise<{ blob: Blob; contentType: string }> {
-    const url = this.fullUrl(path);
-    let headers = this.buildHeaders(undefined, false);
-
-    let response = await this.rawFetch(url, "GET", headers, undefined, signal);
-
-    if (response.status === 401) {
-      if (this.getRefreshToken()) {
-        const refreshed = await this.tryRefreshToken();
-        if (refreshed) {
-          headers = this.buildHeaders(undefined, false);
-          response = await this.rawFetch(url, "GET", headers, undefined, signal);
-          // A retried request that STILL 401s means the refreshed session is
-          // not accepted — treat it as session expiry rather than a plain error.
-          if (response.status === 401) {
-            this.onAuthFailure();
-            throw new ApiError(401, "Session expired. Please log in again.");
-          }
-        } else {
-          this.onAuthFailure();
-          throw new ApiError(401, "Session expired. Please log in again.");
-        }
-      } else {
-        this.onAuthFailure();
-        throw new ApiError(401, "Session expired. Please log in again.");
-      }
-    }
-
-    if (!response.ok) {
-      const error = await response
-        .json()
-        .catch(() => ({ detail: "Request failed" }));
-      throw new ApiError(response.status, error.detail || "Request failed");
-    }
+    const response = await this.authFetch(
+      this.fullUrl(path),
+      "GET",
+      undefined,
+      false,
+      signal
+    );
+    if (!response.ok) throw await this.parseErrorResponse(response);
 
     return {
       blob: await response.blob(),
@@ -252,10 +256,14 @@ class ApiClient {
   ): Promise<void> {
     let response: Response;
     try {
-      response = await this.request<Response>("POST", "/v1/chat/completions", body, {
-        stream: true,
-        signal,
-      });
+      response = await this.authFetch(
+        this.fullUrl("/v1/chat/completions"),
+        "POST",
+        body,
+        true,
+        signal
+      );
+      if (!response.ok) throw await this.parseErrorResponse(response);
     } catch (err) {
       if ((err as Error)?.name === "AbortError") return;
       if (err instanceof ApiError) {
@@ -270,42 +278,19 @@ class ApiClient {
 
     const decoder = new TextDecoder();
 
-    const handleEvent = (event: string): boolean => {
-      if (event.length === 0) return false;
-
-      if (event.startsWith("data: ")) {
-        const payload = event.slice(6);
-        if (payload === "[DONE]") {
-          onDone();
-          return true;
-        }
-        if (payload.startsWith("[ERROR]")) {
-          onError(payload.slice(7).trim() || "Something went wrong.");
-          return true;
-        }
-        if (payload.startsWith("ERROR: ")) {
-          onError(payload.slice(7));
-          return true;
-        }
-        onToken(payload);
-        return false;
-      }
-
-      // Un-prefixed error frames from the backend
-      if (event.startsWith("ERROR: ")) {
-        onError(event.slice(7));
-        return true;
-      }
-      if (event.trim() === "Internal server error") {
-        onError("Internal server error");
-        return true;
-      }
-      return false;
-    };
-
     try {
       for await (const ev of this._readSseChunks(reader, decoder, signal)) {
-        if (handleEvent(ev)) return;
+        const parsed = interpretChatFrame(ev);
+        if (!parsed) continue;
+        if (parsed.type === "done") {
+          onDone();
+          return;
+        }
+        if (parsed.type === "error") {
+          onError(parsed.message);
+          return;
+        }
+        onToken(parsed.token);
       }
       onDone();
     } catch (err) {
@@ -344,25 +329,13 @@ class ApiClient {
     }
   }
 
-  private _parseSseData<T>(raw: string): T | undefined {
-    const event = raw.replace(/\r/g, "").trim();
-    if (!event.startsWith("data:")) return undefined;
-    const payload = event.slice(5).trim();
-    if (!payload || payload === "[DONE]") return undefined;
-    try {
-      return JSON.parse(payload) as T;
-    } catch {
-      return undefined;
-    }
-  }
-
   private async *_readSseStream<T>(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     decoder: TextDecoder,
     signal?: AbortSignal
   ): AsyncGenerator<T> {
     for await (const ev of this._readSseChunks(reader, decoder, signal)) {
-      const obj = this._parseSseData<T>(ev);
+      const obj = parseSseJson<T>(ev);
       if (obj !== undefined) yield obj;
     }
   }
@@ -371,7 +344,7 @@ class ApiClient {
    * Generic SSE reader for endpoints that frame each `data:` line as a JSON
    * object (agent steps, research progress). Yields the parsed objects. Unlike
    * streamChat (plain `data: <token>`), this does NOT touch the chat parser, so
-   * existing chat streaming is unaffected. Auth/refresh is handled by request().
+   * existing chat streaming is unaffected. Auth/refresh is handled by authFetch.
    */
   async *streamEvents<T = unknown>(
     method: string,
@@ -379,10 +352,14 @@ class ApiClient {
     body?: unknown,
     signal?: AbortSignal
   ): AsyncGenerator<T> {
-    const response = await this.request<Response>(method, path, body, {
-      stream: true,
-      signal,
-    });
+    const response = await this.authFetch(
+      this.fullUrl(path),
+      method,
+      body,
+      true,
+      signal
+    );
+    if (!response.ok) throw await this.parseErrorResponse(response);
     const reader = response.body?.getReader();
     if (!reader) throw new ApiError(0, "Streaming not supported by this browser.");
     const decoder = new TextDecoder();

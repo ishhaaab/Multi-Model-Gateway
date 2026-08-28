@@ -39,6 +39,33 @@ import type {
   HfModelDetail,
 } from "./types";
 
+/**
+ * Build a query string from a params object, dropping null/undefined entries.
+ * The only place list/query params are serialized, so shapes stay consistent.
+ */
+function buildQuery(
+  params: Record<string, string | number | boolean | null | undefined>
+): string {
+  const entries = Object.entries(params)
+    .filter(([, v]) => v != null)
+    .map(([k, v]) => [k, String(v)] as [string, string]);
+  const qs = new URLSearchParams(entries).toString();
+  return qs ? `?${qs}` : "";
+}
+
+// ───────────── Chat ─────────────
+// Streamed via the transport's SSE reader (plain text tokens, [DONE]/[ERROR]).
+export const chatApi = {
+  stream: (
+    body: ChatRequest,
+    onToken: (token: string) => void,
+    onDone: () => void,
+    onError: (error: string) => void,
+    signal?: AbortSignal
+  ): Promise<void> =>
+    apiClient.streamChat(body, onToken, onDone, onError, signal),
+};
+
 // ───────────── Auth ─────────────
 export const authApi = {
   register: (email: string, password: string) =>
@@ -180,6 +207,11 @@ export const imageApi = {
 
   aspectRatios: () =>
     apiClient.request<AspectRatiosResponse>("GET", "/v1/images/aspect-ratios"),
+
+  // Authed binary fetch the transport exposes for `<img>`-unreachable URLs
+  // (see lib/authed-image.ts). Generic enough to double as a file download.
+  fetchBlob: (path: string, signal?: AbortSignal) =>
+    apiClient.fetchBlob(path, signal),
 };
 
 // ───────────── Models ─────────────
@@ -215,7 +247,7 @@ export const agentsApi = {
   list: (params?: { limit?: number; offset?: number }) =>
     apiClient.request<ListEnvelope<Agent>>(
       "GET",
-      `/v1/agents${params ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}` : ""}`
+      `/v1/agents${buildQuery(params ?? {})}`
     ),
   get: (id: string) => apiClient.request<Agent>("GET", `/v1/agents/${encodeURIComponent(id)}`),
   create: (data: AgentCreate) => apiClient.request<Agent>("POST", "/v1/agents", data),
@@ -235,7 +267,7 @@ export const marketplaceApi = {
   list: (params?: { limit?: number; offset?: number }) =>
     apiClient.request<ListEnvelope<Agent>>(
       "GET",
-      `/v1/marketplace/agents${params ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}` : ""}`
+      `/v1/marketplace/agents${buildQuery(params ?? {})}`
     ),
   myInstalls: () => apiClient.request<ListEnvelope<AgentInstall>>("GET", "/v1/agents/installs"),
   install: (agentId: string) =>
@@ -256,7 +288,7 @@ export const workspaceApi = {
   edits: (agentId: string, params?: { limit?: number; offset?: number }) =>
     apiClient.request<ListEnvelope<FileEdit>>(
       "GET",
-      `/v1/agents/${encodeURIComponent(agentId)}/workspace/edits${params ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))}` : ""}`
+      `/v1/agents/${encodeURIComponent(agentId)}/workspace/edits${buildQuery(params ?? {})}`
     ),
   undo: (agentId: string, editId: string) =>
     apiClient.request<{ edit_id: string; undone: string; commit_sha: string | null }>(

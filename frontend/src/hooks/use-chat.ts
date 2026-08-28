@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useChatStore } from "@/stores/chat-store";
-import { apiClient } from "@/lib/api-client";
+import { chatApi } from "@/lib/api-endpoints";
 import type { ChatRequest, Provider } from "@/lib/types";
 
 interface SendOptions {
@@ -64,7 +64,7 @@ export function useChat() {
       private: options?.private ?? store.isPrivate,
     };
 
-    await apiClient.streamChat(
+    await chatApi.stream(
       request,
       (token) => useChatStore.getState().appendToStream(token),
       async () => {

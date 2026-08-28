@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { apiClient } from "./api-client";
+import { imageApi } from "./api-endpoints";
 
 // backend path -> object URL. Shared across the whole SPA so a generated image
 // (grid card, history thumb, fullscreen modal) is fetched from the network
@@ -14,7 +14,7 @@ export async function resolveImageUrl(path: string): Promise<string> {
   if (!path.startsWith("/v1/images/")) {
     throw new Error("unresolvable image URL");
   }
-  const { blob } = await apiClient.fetchBlob(path);
+  const { blob } = await imageApi.fetchBlob(path);
   const url = URL.createObjectURL(blob);
   blobCache.set(path, url);
   return url;
@@ -26,7 +26,7 @@ export async function resolveImageUrl(path: string): Promise<string> {
  * given filename via a temporary anchor.
  */
 export async function downloadAuthedFile(path: string, filename: string): Promise<void> {
-  const { blob } = await apiClient.fetchBlob(path);
+  const { blob } = await imageApi.fetchBlob(path);
   const url = URL.createObjectURL(blob);
   try {
     const a = document.createElement("a");
