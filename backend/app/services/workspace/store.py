@@ -165,16 +165,32 @@ class WorkspaceStore:
             subprocess.run(["git", "-C", str(wp), "commit", "--allow-empty", "-m", "init"], check=False)
         return wp
 
+    # Model-controlled bash can write .git/hooks/* (or set core.fsmonitor /
+    # credential.helper) in ANY workspace on the shared volume (sweep H4).
+    # These flags neutralize that: hooksPath points at an empty dir (verified:
+    # with it set, a planted pre-commit hook does NOT run), fsmonitor and
+    # credential helpers are disabled, and the repo's own .git/config cannot
+    # override command-line -c settings (they always win in git).
+    _GIT_HARDEN = [
+        "-c", "core.hooksPath=/dev/null",
+        "-c", "core.fsmonitor=false",
+        "-c", "credential.helper=",
+    ]
+
+    def _git(self, wp: pathlib.Path, *args: str, **kw) -> subprocess.CompletedProcess:
+        """Run a hardened git command inside the workspace."""
+        return subprocess.run(["git", *self._GIT_HARDEN, "-C", str(wp), *args], **kw)
+
     def _commit(self, wp: pathlib.Path, message: str) -> str | None:
         """Commit and return the new HEAD sha (or None on failure)."""
-        subprocess.run(["git", "-C", str(wp), "add", "-A"], check=False)
-        subprocess.run(["git", "-C", str(wp), "commit", "--allow-empty", "-m", message], check=False)
-        proc = subprocess.run(["git", "-C", str(wp), "rev-parse", "HEAD"], capture_output=True, text=True)
+        self._git(wp, "add", "-A", check=False)
+        self._git(wp, "commit", "--allow-empty", "-m", message, check=False)
+        proc = self._git(wp, "rev-parse", "HEAD", capture_output=True, text=True)
         sha = proc.stdout.strip() if proc.returncode == 0 else None
         return sha if sha and len(sha) >= 7 else None
 
     def _revert_commit(self, wp: pathlib.Path, sha: str) -> bool:
-        proc = subprocess.run(["git", "-C", str(wp), "revert", "--no-edit", sha], capture_output=True, text=True)
+        proc = self._git(wp, "revert", "--no-edit", sha, capture_output=True, text=True)
         return proc.returncode == 0
 
     # ── Reads ────────────────────────────────────────────────────────────
@@ -338,7 +354,7 @@ class WorkspaceStore:
             except Exception:
                 pass
             if sha:
-                subprocess.run(["git", "-C", str(wp), "reset", "--hard", "HEAD~1"], check=False)
+                self._git(wp, "reset", "--hard", "HEAD~1", check=False)
             raise
         finally:
             if owned:
@@ -369,7 +385,12 @@ class WorkspaceStore:
             if expected_hashes is not None and fp.is_file():
                 cur = fp.read_text(encoding="utf-8", errors="surrogateescape")
                 cur_hashes = _file_hashes(cur)
-                if expected_hashes != cur_hashes[: len(expected_hashes)] and set(expected_hashes) - set(cur_hashes):
+                # Conflict when the caller's expected prefix doesn't match the
+                # current file. The old `A and B` let stale hashes slip through
+                # whenever the hashes happened to exist elsewhere in the file
+                # (set-difference empty) even though the prefix didn't match —
+                # e.g. all-identical lines. Exact-prefix comparison only.
+                if expected_hashes != cur_hashes[: len(expected_hashes)]:
                     raise AppError(status_code=409, detail="file changed, re-read")
             self._check_quota(user_id, agent_id)
             fp.parent.mkdir(parents=True, exist_ok=True)
@@ -505,7 +526,7 @@ class WorkspaceStore:
             commit = None
             if sha:
                 # Verify the sha exists in this repo before reverting
-                proc = subprocess.run(["git", "-C", str(wp), "cat-file", "-e", sha], capture_output=True)
+                proc = self._git(wp, "cat-file", "-e", sha, capture_output=True)
                 if proc.returncode == 0:
                     commit = sha
             if not commit:
@@ -523,7 +544,7 @@ class WorkspaceStore:
                 # Record undo as new audit row (git → DB, no reset needed here — revert is the fs change)
                 sha2 = None
                 # The revert already created a commit; capture its sha
-                proc2 = subprocess.run(["git", "-C", str(wp), "rev-parse", "HEAD"], capture_output=True, text=True)
+                proc2 = self._git(wp, "rev-parse", "HEAD", capture_output=True, text=True)
                 sha2 = proc2.stdout.strip() if proc2.returncode == 0 else None
                 new_id = str(_uuid.uuid4())
                 try:

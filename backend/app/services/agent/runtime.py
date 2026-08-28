@@ -105,8 +105,11 @@ async def _execute_tool(tool: tool_registry.Tool, raw_args: str, ctx: tool_regis
     except asyncio.TimeoutError:
         return f"Error: tool '{tool.name}' timed out after {settings.TOOL_TIMEOUT_SECONDS}s"
     except Exception as e:
+        # Log the detail server-side but return a generic string: exception text
+        # can leak internal topology to the model (e.g. SSRF guard messages with
+        # internal IPs/hostnames — sweep F11).
         logger.warning("tool '%s' failed: %r", tool.name, e)
-        return f"Error: tool '{tool.name}' failed: {e}"
+        return f"Error: tool '{tool.name}' failed"
     if len(result) > settings.TOOL_RESULT_MAX_CHARS:
         result = result[: settings.TOOL_RESULT_MAX_CHARS] + "\n[truncated]"
     return result
@@ -249,7 +252,9 @@ class AgentRuntime:
                     else:
                         async with AsyncSessionLocal() as tool_db:
                             ctx.tool_context.db = tool_db  # type: ignore[attr-defined]
+                            ctx.tool_context.tool_call_id = tc.id  # audit linkage for file tools
                             result = await _execute_tool(tool, tc.arguments, ctx.tool_context)
+                        ctx.tool_context.tool_call_id = None
 
                     yield {"type": "tool_result", "id": tc.id, "name": name, "content": result}
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})

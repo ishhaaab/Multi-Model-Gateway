@@ -18,6 +18,7 @@ class ToolContext:
     conversation_id: str
     db: AsyncSession
     agent_id: str | None = None  # set when the run is as an agent (ADR-0004)
+    tool_call_id: str | None = None  # set per-dispatch by the runtime (file_edits audit linkage)
 
 
 @dataclass

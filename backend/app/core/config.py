@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     SANDBOX_EXEC_TIMEOUT: int = 30
     SANDBOX_DISK_QUOTA_MB: int = 1024
     SANDBOX_MEMORY_MB: int = 512
+    SANDBOX_SHARED_SECRET: str = ""   # auth for POST /exec; compose wires the same value into both containers
     SANDBOX_IDLE_TTL_S: int = 1800
     SANDBOX_ALLOWLIST: str = "pypi.org,github.com,npmjs.org"
     WORKSPACE_ROOT: str = "/workspaces"

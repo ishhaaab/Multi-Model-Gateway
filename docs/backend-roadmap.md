@@ -438,6 +438,28 @@ The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 wo
   missing — never overwriting a value the operator set deliberately. Both are idempotent:
   re-running changes nothing when the keys already exist.
 
+## Security sweep fixes implemented (sandbox + tools, 2026-08-28)
+
+Two-audit sweep of the agent's host-impact surface. Fixed in this commit; OPEN items listed after.
+
+- **C1/F2 (was CRITICAL): sandbox inherited `.env`** — removed `env_file: .env` from the sandbox service. `SECRET_KEY` in a model-controlled root shell meant forge-any-JWT + Fernet-derive the provider-key encryption key (`core/crypto.py:38`); DB creds rode along. The sandbox needs no secrets.
+- **H3 (was HIGH): `/exec` had zero auth** — shared-secret required (`X-Sandbox-Token` vs `SANDBOX_SHARED_SECRET`, hmac compare, fail-closed when unset); backend `HttpSandbox` sends it; compose injects the same value into both containers.
+- **H4 (was CRITICAL F3): planted git hooks executed in the backend** — verified live (hook fired on raw git, not on hardened git). Store's git calls now route through `_git()` with `-c core.hooksPath=/dev/null -c core.fsmonitor=false -c credential.helper=`. Regression test with a raw-git control.
+- **M1: sandbox container hardening** — `read_only`, `cap_drop: ALL`, `no-new-privileges`, `mem_limit: 512m`, `pids_limit: 128`, `/tmp` tmpfs.
+- **H2 note-honesty:** compose no longer claims a nonexistent egress allowlist (`SANDBOX_ALLOWLIST` remains dead config — see OPEN).
+- **F10/F11/F12/F13 small fixes:** negative_prompt cap; generic tool-error strings (no internal-topology leak); `tool_call_id` populated for file-edits audit; `write_file` expected_hashes exact-prefix semantics.
+- Sweep-verified clean: no docker.sock/host binds/privileged anywhere; backend never runs model-supplied shell; registry dispatch has no bypass; `calculate`/`search_conversations`/patch-argv bounded and safe.
+
+### OPEN (not fixed — fix before flipping ENABLE_CODE_EXECUTION=true for multiple users)
+
+- **F1/C2 (CRITICAL): bash is not confined to the caller's workspace** — the `workspaces` volume holds ALL users; `bash -lc` can read/write every one (`sandbox/app.py:26-44`). Fix shape: per-exec mount namespace exposing only `/workspaces/{user}/{agent}`, or per-user volumes.
+- **F9 (HIGH): bash bypasses the workspace disk quota** (`store.py` quota only gates file-tool writes; `.git` excluded from `du`) — host-disk exhaustion. Fix: post-exec `du` enforcement + count `.git`.
+- **F7 (HIGH, integrity): memory_* writes are default-allowed and tier-1.5 files inject verbatim into every future prompt** — a fetched web page can plant persistent prompt injection. Fix: default-deny `memory_write/append/str_replace/delete`, or sanitize tier-1.5.
+- **F5 (MED-HIGH): DNS-rebinding TOCTOU in `fetch_page`** — host validated at resolve time, connected at a later re-resolution. Fix: pin the validated IP at connect (custom httpx transport).
+- **F6 (MEDIUM): `fetch_page` buffers the full response body** before truncation — gzip-bomb OOM. Fix: stream with a byte cap.
+- **F8 (LOW-MED): read/write use unresolved paths; `read_file` runs without the workspace lock** — symlink-swap race with bash. Fix: `O_NOFOLLOW`, lock reads.
+- Sandbox `subprocess.run` timeout doesn't kill detached grandchildren (`sleep 1000 &`); `TimeoutExpired` unhandled → 500. Fix: `start_new_session=True` + process-group kill.
+
 ## Security/correctness fixes implemented (workspace store)
 
 - **`apply_patch` diff-header validation (patch-body trust boundary).** The `path` *argument*

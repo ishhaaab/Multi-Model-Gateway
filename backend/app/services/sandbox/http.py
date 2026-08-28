@@ -12,10 +12,14 @@ class HttpSandbox:
 
     async def exec(self, cmd: str, workdir: str, user_id: str, agent_id: str) -> ExecResult:  # noqa: A003
         try:
+            # Shared-secret auth (sweep H3): the sandbox refuses unauthenticated
+            # execs, so the client must carry the token on every call.
+            headers = {"X-Sandbox-Token": settings.SANDBOX_SHARED_SECRET} if settings.SANDBOX_SHARED_SECRET else {}
             async with httpx.AsyncClient(timeout=settings.SANDBOX_EXEC_TIMEOUT) as client:
                 resp = await client.post(
                     f"{self.base_url}/exec",
                     json={"cmd": cmd, "workdir": workdir, "user_id": user_id, "agent_id": agent_id},
+                    headers=headers,
                 )
                 resp.raise_for_status()
                 data = resp.json()

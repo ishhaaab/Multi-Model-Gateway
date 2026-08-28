@@ -213,6 +213,38 @@ class WorkspacePipelineTests(unittest.TestCase):
         store_mod._workspace_path = lambda u, a: self.root / str(u) / str(a)
         self.addCleanup(lambda: setattr(store_mod, "_workspace_path", self._orig_path))
 
+    def test_planted_git_hook_does_not_execute(self):
+        """Sweep H4 regression: model-controlled bash can write .git/hooks/* in
+        any workspace on the shared volume; the store's hardened git calls
+        (core.hooksPath override) must ensure the planted hook never runs
+        inside the backend container. The control (raw git commit) proves the
+        hook genuinely fires without hardening."""
+        import os
+        loop = asyncio.new_event_loop()
+        try:
+            wp = self.root / "u1" / "a1"
+            self.store.ensure_workspace("u1", "a1")
+            (wp / "code.txt").write_text("hello\n", encoding="utf-8")
+            hooks = wp / ".git" / "hooks"
+            hooks.mkdir(exist_ok=True)
+            hook = hooks / "pre-commit"
+            hook.write_text("#!/bin/sh\necho EVIL > pwned.txt\nexit 0\n", encoding="utf-8")
+            try:
+                os.chmod(hook, 0o755)
+            except OSError:
+                pass  # Windows: exec-bit not enforced; git on windows still runs hooks
+
+            self.store._commit(wp, "hardened commit with planted hook")
+            self.assertFalse((wp / "pwned.txt").exists(), "planted hook executed despite hooksPath hardening")
+
+            # Control: the same hook DOES fire via raw git (no hardening) —
+            # guards against the test passing because the hook is inert.
+            subprocess.run(["git", "-C", str(wp), "add", "-A"], check=False)
+            subprocess.run(["git", "-C", str(wp), "commit", "--allow-empty", "-m", "raw control"], check=False)
+            self.assertTrue((wp / "pwned.txt").exists(), "control failed: hook did not fire on raw git — test is vacuous")
+        finally:
+            loop.close()
+
     def test_write_file_commits_and_audits(self):
         loop = asyncio.new_event_loop()
         try:

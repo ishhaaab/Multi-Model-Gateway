@@ -31,6 +31,9 @@ async def _generate_image(args: dict, ctx: ToolContext) -> str:
     negative_prompt = args.get("negative_prompt")
     if negative_prompt is None:
         negative_prompt = DEFAULT_NEGATIVE_PROMPT
+    negative_prompt = str(negative_prompt)
+    if len(negative_prompt) > 4000:
+        return "Error: 'negative_prompt' must be at most 4000 characters"
 
     try:
         steps = int(args.get("steps", 10))

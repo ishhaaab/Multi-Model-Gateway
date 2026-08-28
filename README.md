@@ -324,6 +324,7 @@ Auto HTTPS is disabled. The frontend should call `/api/v1/*` and Caddy will forw
 | `COMFY_URL` | No | ComfyUI base URL for image generation (default: `http://host.docker.internal:8188`) |
 | `OPENROUTER_API_KEY` | No | OpenRouter API key |
 | `OPENROUTER_DEFAULT_MODEL` | No | Default OpenRouter model |
+| `SANDBOX_SHARED_SECRET` | **Yes for code-execution** | Shared secret for the sandbox `POST /exec` endpoint — compose injects it into both backend and sandbox; the sandbox fail-closes (refuses every exec) when unset. Use any long random string. Required whenever `ENABLE_CODE_EXECUTION=true` |
 | `SUGGEST_CLOUD_MODEL` | No | Pin a specific cloud model for `POST /v1/agents/suggest` (empty = derive from the resolved provider model). Try a `:free` model if your key is free-only |
 | `SUGGEST_CLOUD_FALLBACK_MODELS` | No | Comma-separated free-model candidates Smart Suggest tries after the primary cloud model, before falling back to local (default `meta-llama/llama-3.1-8b-instruct:free, google/gemma-2-9b-it:free, qwen/qwen-2-7b-instruct:free`) |
 | `POSTGRES_USER` | Yes | PostgreSQL user, required by docker-compose (default `ishaab`; the setup scripts add it to `.env` if missing). Must match the user embedded in `DATABASE_URL` |

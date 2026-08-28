@@ -25,6 +25,9 @@ services:
       - workspaces:/workspaces
     env_file:
       - .env
+    environment:
+      # /exec shared secret — must match the sandbox service (sweep H3)
+      - SANDBOX_SHARED_SECRET=${SANDBOX_SHARED_SECRET:-}
     secrets:
       - openrouter_api_key
     extra_hosts:
@@ -37,7 +40,7 @@ services:
     # degrade to cpu_only verdicts:
     gpus: all
 
-  # Code-execution sandbox for file tools (bash/edit_patch/edit_lines, T3).
+  # Code-execution sandbox for file tools (security sweep C1/H1/H3/M1).
   # Per-user-per-agent git-backed workspaces live on the shared named volume.
   # Mock in tests/dev when ENABLE_CODE_EXECUTION is false; no host ports.
   sandbox:
@@ -45,12 +48,27 @@ services:
       context: ./sandbox
     volumes:
       - workspaces:/workspaces
-    env_file:
-      - .env
+    # NO env_file (sweep C1): the sandbox needs no secrets, and inheriting .env
+    # handed a model-controlled root shell SECRET_KEY (forge JWTs + derive the
+    # Fernet provider-key encryption key), DATABASE_URL, POSTGRES_PASSWORD, ...
+    # The ONE deliberate exception (sweep H3): the /exec shared secret. Set
+    # SANDBOX_SHARED_SECRET in .env (any long random string) — compose injects
+    # it into BOTH backend and sandbox; the sandbox app fail-closes without it.
+    environment:
+      - SANDBOX_SHARED_SECRET=${SANDBOX_SHARED_SECRET:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # Isolated: no ports to host; backend reaches it at http://sandbox:8001
-    # Egress is allowlisted in the sandbox app itself (Q6 B).
+    # Container hardening (sweep M1): read-only root fs, no caps, no new privs.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
+    mem_limit: 512m
+    pids_limit: 128
 
   # deep-research job worker (arq, Redis broker)
   worker:
@@ -62,6 +80,9 @@ services:
       - ./backend:/app
     env_file:
       - .env
+    environment:
+      # /exec shared secret — must match the sandbox service (sweep H3)
+      - SANDBOX_SHARED_SECRET=${SANDBOX_SHARED_SECRET:-}
     secrets:
       - openrouter_api_key
     extra_hosts:
