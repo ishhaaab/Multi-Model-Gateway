@@ -186,6 +186,51 @@ class NofollowIoTests(unittest.TestCase):
                 _read_text_fp(link)
 
 
+class DuQuotaTests(unittest.TestCase):
+    """F9: du_mb must count .git so bash (git clone/dd) can't outgrow the quota,
+    and quota_mb() must expose the configured cap to the bash tool."""
+
+    @classmethod
+    def setUpClass(cls):
+        if WorkspaceStore is None:
+            raise unittest.SkipTest(
+                f"app.services.workspace.store import failed in this env: {_IMPORT_ERROR}"
+            )
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.store = WorkspaceStore()
+        self.root = pathlib.Path(self._tmp.name)
+        import app.services.workspace.store as store_mod
+        self._orig_path = store_mod._workspace_path
+        store_mod._workspace_path = lambda u, a: self.root / str(u) / str(a)
+        self.addCleanup(lambda: setattr(store_mod, "_workspace_path", self._orig_path))
+
+    def test_du_mb_counts_git(self):
+        """Regression: .git objects were excluded, letting git clone/dd inflate the
+        workspace past the quota. Now every regular file (incl. .git) counts."""
+        self.store.ensure_workspace("u1", "a1")
+        wp = self.root / "u1" / "a1"
+        # write a file AND a pseudo .git object
+        (wp / "code.txt").write_text("x" * 1024, encoding="utf-8")
+        git_obj = wp / ".git" / "objects" / "ab" / "cdef"
+        git_obj.parent.mkdir(parents=True, exist_ok=True)
+        git_obj.write_bytes(b"y" * 2048)
+        du = self.store.du_mb("u1", "a1")
+        self.assertGreater(du, 0)
+        # ~3KiB total => about 0.0029 MiB; assert it's in a sane nonzero range
+        self.assertGreater(du, 0.001)
+        self.assertLess(du, 0.05)
+
+    def test_quota_mb_returns_setting(self):
+        import app.services.workspace.store as store_mod
+        self.assertEqual(
+            self.store.quota_mb(),
+            float(store_mod.settings.SANDBOX_DISK_QUOTA_MB),
+        )
+
+
 def hashlib_sha1_8(text):
     import hashlib
 

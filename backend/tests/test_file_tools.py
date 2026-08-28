@@ -242,6 +242,26 @@ class BashToolTests(unittest.TestCase):
         self.assertIn("exit_code", data)
         self.assertEqual(data["exit_code"], 0)
 
+    def test_quota_exceeded_after_exec_returns_413(self):
+        """F9 regression: bash must be held to the same workspace quota as the
+        file tools. A workspace over quota returns a structured 413 result, not a
+        free pass."""
+        from unittest.mock import patch
+        import app.services.workspace.store as store_mod
+        from app.core.config import settings
+
+        async def scenario():
+            # Write a file into the workspace so du_mb > 0.
+            with patch.object(settings, "ENABLE_CODE_EXECUTION", False):
+                # force quota_mb() to 0 so any content exceeds it
+                with patch.object(store_mod.WorkspaceStore, "quota_mb", return_value=0.0):
+                    out = await _bash._bash({"command": "echo hi", "workdir": "."}, _ctx())
+            data = json.loads(out)
+            self.assertEqual(data["exit_code"], 413)
+            self.assertIn("quota exceeded", data["stderr"])
+            self.assertTrue(data.get("truncated"))
+        self._run(scenario())
+
 
 if __name__ == "__main__":
     unittest.main()

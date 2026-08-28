@@ -22,6 +22,16 @@ async def _bash(args: dict, ctx: ToolContext) -> str:
     async with store.with_workspace_lock(str(ctx.user_id), str(agent_id)):
         sandbox = get_sandbox()
         res = await sandbox.exec(str(cmd), str(workdir), str(ctx.user_id), str(agent_id))
+        # F9: bash runs arbitrary commands (git clone, dd) that grow the workspace
+        # past the file-tool quota. Enforce the SAME quota after every exec (the
+        # lock is held, so the du is consistent). .git is now counted by du_mb.
+        if store.du_mb(str(ctx.user_id), str(agent_id)) > store.quota_mb():
+            return json.dumps({
+                "stdout": res.stdout,
+                "stderr": "workspace quota exceeded (bash output may be truncated)",
+                "exit_code": 413,
+                "truncated": True,
+            }, ensure_ascii=False)
     # Return structured JSON so the model can see exit code + streams
     out = {"stdout": res.stdout, "stderr": res.stderr, "exit_code": res.exit_code}
     if res.truncated:

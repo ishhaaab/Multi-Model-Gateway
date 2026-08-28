@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-28 — Workspace disk quota enforced for bash (F9)
+
+- **`.git` now counts toward the workspace quota** (`store.du_mb` no longer skips `.git`). A model-controlled `bash` could run `git clone`/`dd` and grow the workspace far past the quota (the file tools' `_check_quota` was the only gate, and it excluded `.git`).
+- **The `bash` tool enforces the same quota after every exec.** With the workspace lock held, `store.du_mb(...) > store.quota_mb()` returns a structured `exit_code: 413` result ("workspace quota exceeded"), so bash is held to the same disk cap as the file tools. Added a public `store.quota_mb()` accessor.
+- **Tests:** `test_workspace_store.py::DuQuotaTests` (`.git` counted; `quota_mb()` returns the setting) and `test_file_tools.py::BashToolTests::test_quota_exceeded_after_exec_returns_413`.
+
 ## 2026-08-28 — Workspace symlink-swap hardening (F8): O_NOFOLLOW text I/O
 
 - **`services/workspace/store.py` reads and writes now refuse a final-component symlink via `O_NOFOLLOW`** (POSIX), closing the F8 symlink-swap TOCTOU: a model-controlled `bash` could race the file tools by swapping a workspace file for a symlink between `_resolveInside`'s check and the actual `open()/read`. `_resolveInside` already rejected symlink *escape* (a link pointing outside the workspace); `O_NOFOLLOW` closes the remaining final-component race. On platforms without `O_NOFOLLOW` (Windows) it degrades to a plain open — the compose volume is Linux, so the guard is effective where the workspace actually lives. Applied to `read_file`, `write_file`, `apply_patch`, and `edit_lines` via new `_read_text_fp`/`_write_text_fp` helpers.

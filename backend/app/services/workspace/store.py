@@ -281,8 +281,12 @@ class WorkspaceStore:
     def du_mb(self, user_id: str, agent_id: str) -> float:
         wp = self.ensure_workspace(user_id, agent_id)
         total = 0
+        # Count EVERY regular file under the workspace, including .git (F9): git
+        # objects from `git clone`/`git add` were previously excluded, letting
+        # bash grow the workspace far past the quota. Symlinks are not followed
+        # (rglob + is_file skips them), so a symlink can't inflate the count.
         for p in wp.rglob("*"):
-            if ".git" in p.parts or not p.is_file():
+            if not p.is_file():
                 continue
             try:
                 total += p.stat().st_size
@@ -291,8 +295,12 @@ class WorkspaceStore:
         return total / (1024 * 1024)
 
     def _check_quota(self, user_id: str, agent_id: str) -> None:
-        if self.du_mb(user_id, agent_id) > float(settings.SANDBOX_DISK_QUOTA_MB):
+        if self.du_mb(user_id, agent_id) > self.quota_mb():
             raise AppError(status_code=413, detail="workspace quota exceeded")
+
+    def quota_mb(self) -> float:
+        """The workspace disk quota in MiB (public — the bash tool reads it)."""
+        return float(settings.SANDBOX_DISK_QUOTA_MB)
 
     # ── Mutating helpers (the hidden pipeline) ───────────────────────────
 

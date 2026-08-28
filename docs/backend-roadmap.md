@@ -453,8 +453,13 @@ Two-audit sweep of the agent's host-impact surface. Fixed in this commit; OPEN i
 ### OPEN (not fixed — fix before flipping ENABLE_CODE_EXECUTION=true for multiple users)
 
 - **F1/C2 (CRITICAL): bash is not confined to the caller's workspace** — the `workspaces` volume holds ALL users; `bash -lc` can read/write every one (`sandbox/app.py:26-44`). Fix shape: per-exec mount namespace exposing only `/workspaces/{user}/{agent}`, or per-user volumes.
-- **F9 (HIGH): bash bypasses the workspace disk quota** (`store.py` quota only gates file-tool writes; `.git` excluded from `du`) — host-disk exhaustion. Fix: post-exec `du` enforcement + count `.git`.
 - Sandbox network egress is still unrestricted (compose claim corrected; real enforcement needs network policy).
+
+## Workspace disk quota enforced for bash (F9 closed, 2026-08-28)
+
+- **`.git` counts toward the quota now** — `store.du_mb` previously skipped `.git`, so `git clone`/`dd` via bash could outgrow the quota (the file-tool `_check_quota` was the only gate). Added a public `store.quota_mb()` accessor.
+- **The `bash` tool enforces the same quota after every exec** (lock held) — over-quota returns a structured `exit_code: 413` "workspace quota exceeded" result.
+- Tests: `test_workspace_store.py::DuQuotaTests`; `test_file_tools.py::BashToolTests::test_quota_exceeded_after_exec_returns_413`.
 
 ## Workspace symlink-swap hardening (F8 closed, 2026-08-28)
 
