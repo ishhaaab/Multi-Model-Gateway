@@ -89,6 +89,48 @@ def _resolveInside(workspace_root: pathlib.Path, rel: str) -> pathlib.Path:
     return abs_path
 
 
+# ── Patch-body validation: the diff's own header paths are a second trust boundary ──
+
+def _patch_header_paths(patch: str) -> list[str]:
+    """Extract the target path from every ---/+++ line in a unified diff.
+
+    Handles the optional leading `--- a/...` (git-style) and timestamp suffixes
+    (`--- a/f.txt\t2026-01-01 ...`). Returns paths verbatim (with the a//b/
+    prefix still on) — stripping is the caller's job.
+    """
+    paths: list[str] = []
+    for line in patch.splitlines():
+        if line.startswith("--- ") or line.startswith("+++ "):
+            raw = line[4:].split("\t", 1)[0].strip()
+            if raw and raw != "/dev/null":
+                paths.append(raw)
+            elif raw == "/dev/null":
+                continue  # file-addition / removal hunks target only one side
+    return paths
+
+
+def _validate_patch_targets(workspace_root: pathlib.Path, patch: str) -> None:
+    """Run every diff-header target through the same rules as `_resolveInside`
+    (after stripping the git a//b/ prefix and the -p1 strip level).
+
+    Unified-diff headers take the form [ab]/path — the same shape `-p1` strips.
+    /dev/null (add/remove hunks) is skipped. Raises 422 on any target that
+    would land outside the workspace: absolute paths, `..` segments, or a
+    symlink planted inside the workspace pointing out.
+    """
+    for raw in _patch_header_paths(patch):
+        target = raw
+        if target.startswith(("a/", "b/")):
+            target = target[2:]
+        # -p1 also strips a leading ./ if present (a/./f.txt → f.txt)
+        if target.startswith("./"):
+            target = target[2:]
+        if not target:
+            # e.g. header is `--- a/` — degenerate; let the -p1 semantics decide
+            continue
+        _resolveInside(workspace_root, target)
+
+
 def _assertNotDirectory(rel: str) -> None:
     if rel == "." or rel in (".", "./"):
         raise AppError(status_code=422, detail="path is a directory")
@@ -357,6 +399,13 @@ class WorkspaceStore:
                 if "@@" not in patch:
                     raise AppError(status_code=422, detail="patch must be a unified diff")
             fp = _resolveInside(wp, path)
+            # The `path` argument above is not the only trust boundary: the diff
+            # body's own ---/+++ header paths are what `patch -p1` actually
+            # opens, with cwd=wp. Every one of them must land inside the
+            # workspace too, or a crafted diff writes outside the "one 422
+            # seam" (either directly on builds whose patch doesn't refuse `..`,
+            # or via a symlink planted inside the workspace by another tool).
+            _validate_patch_targets(wp, patch)
             rel = path
             if expected_hashes is not None and fp.is_file():
                 cur = fp.read_text(encoding="utf-8", errors="surrogateescape")

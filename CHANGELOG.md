@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-08-28 — Workspace: validate patch-body target paths (defense-in-depth)
+
+- Backend: `WorkspaceStore.apply_patch` now validates the unified diff's own `---`/`+++` header paths through the same `_resolveInside` rules as the `path` argument (`_validate_patch_targets`), before handing the patch to `patch -p1`. Previously only the `path` argument was checked — the diff body (what `patch` actually opens, cwd=workspace) was trusted. Closes the direct `../` header escape on `patch` builds that don't refuse it, and the symlink-planted-inside-the-workspace variant. Verified claim severity first: modern GNU patch (≥2.6, what Debian/Alpine images ship) already refuses `..` targets that escape cwd — so this is hardening restoring ADR-0008's "one 422 seam", not an open RCE. Tests are offline (rejection fires before the subprocess).
+
 ## 2026-08-28 — Agent stream lifecycle, capability gate, memory rollback (architecture review C1/C2/C4)
 
 - **Backend:** fixed a critical stream-slot leak in the agent path. `services/agent/agent.py::run_agent` released the per-user stream slot only `if not entered_runtime`, so every successful (and every mid-run-failed) agent chat leaked a slot — after `MAX_CONCURRENT_STREAMS` runs the user was hard-429'd until backend restart. `run_agent`'s `finally` now releases unconditionally (mirroring `routers/chat.py`'s outer `stream_tokens` wrapper); `release_stream_slot` is already idempotent so this cannot double-free. The chat/research paths already released correctly; this was the one divergent lifecycle.

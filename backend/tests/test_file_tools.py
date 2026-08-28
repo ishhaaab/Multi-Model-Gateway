@@ -156,6 +156,39 @@ class FileToolsTests(unittest.TestCase):
         read = json.loads(self._run(_files._read_file({"path": "f.txt"}, ctx)))
         self.assertIn("ONE", read["content"])
 
+    def test_edit_patch_rejects_escaping_diff_headers(self):
+        """Regression: the diff body's own ---/+++ header paths are what
+        `patch -p1` opens — they must pass the same _resolveInside rules as the
+        path argument, or a crafted diff targets files outside the workspace."""
+        ctx = _ctx()
+        self._run(_files._write_file({"path": "f.txt", "content": "one\n"}, ctx))
+        for bad in (
+            "--- a/../../victim.txt\n+++ b/../../victim.txt\n@@ -1 +1 @@\n-x\n+y\n",
+            "--- /etc/passwd\n+++ /etc/passwd\n@@ -1 +1 @@\n-x\n+y\n",
+            "--- a/sub/../../victim.txt\n+++ b/sub/../../victim.txt\n@@ -1 +1 @@\n-x\n+y\n",
+        ):
+            out = self._run(_files._edit_patch({"path": "f.txt", "patch": bad}, ctx))
+            self.assertTrue(out.startswith("Error:"), f"expected rejection for {bad!r}, got {out!r}")
+
+    def test_patch_header_paths_helper(self):
+        """Pure helper: extracts ---/+++ targets, handles timestamps and /dev/null."""
+        from app.services.workspace.store import _patch_header_paths, _validate_patch_targets
+        paths = _patch_header_paths(
+            "--- a/src/x.py\t2026-01-01 00:00:00\n"
+            "+++ b/src/x.py\n"
+            "+++ /dev/null\n"
+            "--- /dev/null\n"
+            "--- a/new_file.txt\n"
+        )
+        self.assertEqual(paths, ["a/src/x.py", "b/src/x.py", "a/new_file.txt"])
+        # git-style a//b prefixes strip to valid inside targets → no raise
+        _validate_patch_targets(pathlib.Path("."), "--- a/f.txt\n+++ b/f.txt\n")
+        # a degenerate `--- a/` header is skipped (patch fails later on the
+        # empty filename) but must NOT bypass validation of the other headers
+        with self.assertRaises(Exception) as ctxm:
+            _validate_patch_targets(pathlib.Path("."), "--- a/\t2026\n+++ b/../../victim.txt\n")
+        self.assertEqual(getattr(ctxm.exception, "status_code", None), 422)
+
     def test_write_with_stale_expected_hashes_conflicts(self):
         ctx = _ctx()
         self._run(_files._write_file({"path": "f.txt", "content": "a\n"}, ctx))

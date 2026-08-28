@@ -440,6 +440,18 @@ The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 wo
 
 ## Security/correctness fixes implemented (workspace store)
 
+- **`apply_patch` diff-header validation (patch-body trust boundary).** The `path` *argument*
+  was always validated through `_resolveInside`, but the diff *body's* own `---`/`+++` header
+  paths are what `patch -p1` actually opens (cwd=wp) — they went to the subprocess unvalidated.
+  New pure helpers `_patch_header_paths` + `_validate_patch_targets` extract every header target
+  (handling git `a/`/`b/` prefixes, timestamp suffixes, `/dev/null` add/remove hunks), strip the
+  `-p1` level, and run each through the same `_resolveInside` rules before the subprocess runs.
+  This closes the direct `../` escape on builds whose `patch` doesn't refuse it, and the symlink
+  variant (a symlink planted inside the workspace by another tool pointing outside). Degenerate
+  `--- a/` headers are skipped (an empty filename makes `patch` fail later anyway) but never
+  bypass validation of the sibling headers. Regression tests in `tests/test_file_tools.py` run
+  offline (the 422 fires before the subprocess).
+
 - **`AppError(status_code=...)` now works.** `services/workspace/store.py` raised
   `AppError(status_code=422, detail=...)` in 27 places (the single path-security seam from
   ADR-0002/0003), but `core/exceptions.py::AppError.__init__` only accepted `detail` — so
