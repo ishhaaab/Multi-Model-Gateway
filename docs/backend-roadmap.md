@@ -454,8 +454,11 @@ Two-audit sweep of the agent's host-impact surface. Fixed in this commit; OPEN i
 
 - **F1/C2 (CRITICAL): bash is not confined to the caller's workspace** — the `workspaces` volume holds ALL users; `bash -lc` can read/write every one (`sandbox/app.py:26-44`). Fix shape: per-exec mount namespace exposing only `/workspaces/{user}/{agent}`, or per-user volumes.
 - **F9 (HIGH): bash bypasses the workspace disk quota** (`store.py` quota only gates file-tool writes; `.git` excluded from `du`) — host-disk exhaustion. Fix: post-exec `du` enforcement + count `.git`.
-- **F8 (LOW-MED): read/write use unresolved paths; `read_file` runs without the workspace lock** — symlink-swap race with bash. Fix: `O_NOFOLLOW`, lock reads.
 - Sandbox network egress is still unrestricted (compose claim corrected; real enforcement needs network policy).
+
+## Workspace symlink-swap hardening (F8 closed, 2026-08-28)
+
+- **Reads/writes now use `O_NOFOLLOW` on the final component** (`_read_text_fp`/`_write_text_fp`). `_resolveInside` already rejected symlink *escape*; this closes the TOCTOU where `bash` swaps a file for a symlink between the resolve check and the open. POSIX-only guard (degrades to plain open on Windows); the compose volume is Linux so it's effective in production. Applied to `read_file`, `write_file`, `apply_patch`, `edit_lines`. Tests: `test_workspace_store.py::NofollowIoTests`.
 
 ## Sandbox timeout hardening (2026-08-28)
 

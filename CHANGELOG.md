@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-28 — Workspace symlink-swap hardening (F8): O_NOFOLLOW text I/O
+
+- **`services/workspace/store.py` reads and writes now refuse a final-component symlink via `O_NOFOLLOW`** (POSIX), closing the F8 symlink-swap TOCTOU: a model-controlled `bash` could race the file tools by swapping a workspace file for a symlink between `_resolveInside`'s check and the actual `open()/read`. `_resolveInside` already rejected symlink *escape* (a link pointing outside the workspace); `O_NOFOLLOW` closes the remaining final-component race. On platforms without `O_NOFOLLOW` (Windows) it degrades to a plain open — the compose volume is Linux, so the guard is effective where the workspace actually lives. Applied to `read_file`, `write_file`, `apply_patch`, and `edit_lines` via new `_read_text_fp`/`_write_text_fp` helpers.
+- **Tests:** `test_workspace_store.py::NofollowIoTests` — read/write round-trip on all platforms; the actual symlink-refusal case runs on POSIX (it's skipped on Windows where `O_NOFOLLOW` is absent, but runs in the Linux backend container).
+
 ## 2026-08-28 — Sandbox: kill the whole process group on timeout (no orphaned grandchildren)
 
 - `sandbox/app.py::exec_cmd` now runs bash with `start_new_session=True` and kills the **entire process group** on timeout (`os.killpg(proc.pid, 9)`) instead of just timing out. Previously `subprocess.run(timeout=30)` raised `TimeoutExpired` (→ 500) and orphaned detached grandchildren like `sleep 1000 &`, which kept running and consuming quota/CPU after the request returned. Also replaced the odd `os.getpgid(0)` no-op with a guarded `killpg(proc.pid, 9)`; a `Popen` launch failure now returns a bounded `exit_code=1` error string instead of a 500. Note: the sandbox is a separate Linux container not covered by the backend test discovery — this change is verified by inspection (no docker on this host).

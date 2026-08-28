@@ -19,6 +19,7 @@ Internal seams (private): _resolveInside, _checkQuota, _audit, git helpers.
 
 import asyncio
 import hashlib
+import os
 import pathlib
 import subprocess
 from typing import Optional
@@ -41,6 +42,45 @@ def _workspace_root() -> pathlib.Path:
 
 def _workspace_path(user_id: str, agent_id: str) -> pathlib.Path:
     return _workspace_root() / str(user_id) / str(agent_id)
+
+
+# ── O_NOFOLLOW text I/O (F8): a model-controlled `bash` can race the file tools
+# by swapping a workspace file for a symlink between _resolveInside's check and the
+# actual open()/read. O_NOFOLLOW refuses a final-component symlink at open time.
+#   - POSIX: guaranteed. The resolve in _resolveInside already rejects symlink
+#     *escape* (a link pointing outside the workspace) and O_NOFOLLOW closes the
+#     final-component TOCTOU window.
+#   - Windows: os.O_NOFOLLOW is absent (symlinks are rare in workspace tasks and
+#     the compose volume is Linux); we degrade to a plain open there.
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
+def _read_text_fp(fp: pathlib.Path) -> str:
+    """Read a text file refusing a final-component symlink (O_NOFOLLOW)."""
+    if _NOFOLLOW:
+        fd = os.open(str(fp), os.O_RDONLY | _NOFOLLOW)
+        try:
+            with os.fdopen(fd, "r", encoding="utf-8", errors="surrogateescape") as f:
+                return f.read()
+        except Exception:
+            os.close(fd)
+            raise
+    return fp.read_text(encoding="utf-8", errors="surrogateescape")
+
+
+def _write_text_fp(fp: pathlib.Path, content: str) -> None:
+    """Write a text file refusing a final-component symlink (O_NOFOLLOW)."""
+    if _NOFOLLOW:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _NOFOLLOW
+        fd = os.open(str(fp), flags, 0o644)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+        except Exception:
+            os.close(fd)
+            raise
+    else:
+        fp.write_text(content, encoding="utf-8")
 
 
 def _line_hash(line: str) -> str:
@@ -205,7 +245,7 @@ class WorkspaceStore:
         fp = _resolveInside(wp, rel)
         if not fp.is_file():
             raise AppError(status_code=404, detail="file not found")
-        content = fp.read_text(encoding="utf-8", errors="surrogateescape")
+        content = _read_text_fp(fp)
         lines = content.splitlines()
         return {
             "content": content,
@@ -383,7 +423,7 @@ class WorkspaceStore:
             fp = _resolveInside(wp, path)
             rel = path
             if expected_hashes is not None and fp.is_file():
-                cur = fp.read_text(encoding="utf-8", errors="surrogateescape")
+                cur = _read_text_fp(fp)
                 cur_hashes = _file_hashes(cur)
                 # Conflict when the caller's expected prefix doesn't match the
                 # current file. The old `A and B` let stale hashes slip through
@@ -394,8 +434,8 @@ class WorkspaceStore:
                     raise AppError(status_code=409, detail="file changed, re-read")
             self._check_quota(user_id, agent_id)
             fp.parent.mkdir(parents=True, exist_ok=True)
-            before = fp.read_text(encoding="utf-8", errors="surrogateescape") if fp.is_file() else ""
-            fp.write_text(content, encoding="utf-8")
+            before = _read_text_fp(fp) if fp.is_file() else ""
+            _write_text_fp(fp, content)
             after = content
             before_hash = hashlib.sha1(before.encode()).hexdigest()[:8] if before else None
             after_hash = hashlib.sha1(after.encode()).hexdigest()[:8]
@@ -429,12 +469,12 @@ class WorkspaceStore:
             _validate_patch_targets(wp, patch)
             rel = path
             if expected_hashes is not None and fp.is_file():
-                cur = fp.read_text(encoding="utf-8", errors="surrogateescape")
+                cur = _read_text_fp(fp)
                 cur_hashes = _file_hashes(cur)
                 if set(expected_hashes) - set(cur_hashes):
                     raise AppError(status_code=409, detail="file changed, re-read")
             self._check_quota(user_id, agent_id)
-            before = fp.read_text(encoding="utf-8", errors="surrogateescape") if fp.is_file() else ""
+            before = _read_text_fp(fp) if fp.is_file() else ""
             try:
                 proc = subprocess.run(
                     ["patch", "-p1", "--forward", "--batch"],
@@ -447,7 +487,7 @@ class WorkspaceStore:
                     raise AppError(status_code=422, detail=f"patch failed: {proc.stderr.decode(errors='ignore')[:400]}")
             except FileNotFoundError:
                 raise AppError(status_code=422, detail="patch tool unavailable in this environment")
-            after = fp.read_text(encoding="utf-8", errors="surrogateescape") if fp.is_file() else ""
+            after = _read_text_fp(fp) if fp.is_file() else ""
             before_hash = hashlib.sha1(before.encode()).hexdigest()[:8] if before else None
             after_hash = hashlib.sha1(after.encode()).hexdigest()[:8] if after else None
             return await self._finalize_edit(wp, rel, "patch", user_id, agent_id, patch, before_hash, after_hash, tool_call_id, db)
@@ -472,7 +512,7 @@ class WorkspaceStore:
             rel = path
             if not fp.is_file():
                 raise AppError(status_code=404, detail="file not found")
-            cur = fp.read_text(encoding="utf-8", errors="surrogateescape")
+            cur = _read_text_fp(fp)
             lines = cur.splitlines()
             cur_hashes = [_line_hash(l) for l in lines]
             if not set(old_hashes).issubset(set(cur_hashes)):
@@ -492,7 +532,7 @@ class WorkspaceStore:
             if cur.endswith("\n"):
                 after += "\n"
             self._check_quota(user_id, agent_id)
-            fp.write_text(after, encoding="utf-8")
+            _write_text_fp(fp, after)
             before_hash = hashlib.sha1(before.encode()).hexdigest()[:8]
             after_hash = hashlib.sha1(after.encode()).hexdigest()[:8]
             patch = f"edit_lines {rel} {','.join(old_hashes[:4])}"

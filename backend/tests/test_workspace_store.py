@@ -48,6 +48,8 @@ def _import_store_with_stub_db():
             _file_hashes,
             _line_hash,
             _resolveInside,
+            _read_text_fp,
+            _write_text_fp,
         )
     finally:
         # Restore the real app.db so sibling test modules see the real thing.
@@ -55,16 +57,18 @@ def _import_store_with_stub_db():
             sys.modules["app.db"] = real
         else:
             sys.modules.pop("app.db", None)
-    return WorkspaceStore, _file_hashes, _line_hash, _resolveInside
+    return WorkspaceStore, _file_hashes, _line_hash, _resolveInside, _read_text_fp, _write_text_fp
 
 
 try:
-    WorkspaceStore, _file_hashes, _line_hash, _resolveInside = _import_store_with_stub_db()
+    WorkspaceStore, _file_hashes, _line_hash, _resolveInside, _read_text_fp, _write_text_fp = _import_store_with_stub_db()
 except Exception as exc:  # noqa: BLE001 — env may lack a required import dep
     WorkspaceStore = None
     _file_hashes = None
     _line_hash = None
     _resolveInside = None
+    _read_text_fp = None
+    _write_text_fp = None
     _IMPORT_ERROR = exc
 else:
     _IMPORT_ERROR = None
@@ -147,6 +151,39 @@ class HashesTests(unittest.TestCase):
 
     def test_hash_changes_with_content(self):
         self.assertNotEqual(_line_hash("a"), _line_hash("b"))
+
+
+class NofollowIoTests(unittest.TestCase):
+    """F8: _read_text_fp/_write_text_fp refuse a final-component symlink via
+    O_NOFOLLOW where the platform supports it (POSIX). On platforms without
+    O_NOFOLLOW (Windows) they fall back to a plain read/write, so the test
+    asserts the fallback round-trips correctly and, when O_NOFOLLOW is present,
+    refuses a symlink target."""
+
+    @classmethod
+    def setUpClass(cls):
+        if _read_text_fp is None or _write_text_fp is None:
+            raise unittest.SkipTest(
+                f"workspace store import failed in this env: {_IMPORT_ERROR}"
+            )
+
+    def test_read_write_round_trip(self):
+        with tempfile.TemporaryDirectory() as td:
+            fp = pathlib.Path(td) / "f.txt"
+            _write_text_fp(fp, "hello")
+            self.assertEqual(_read_text_fp(fp), "hello")
+
+    @unittest.skipUnless(hasattr(__import__("os"), "O_NOFOLLOW"), "POSIX-only")
+    def test_read_refuses_symlink_when_o_nofollow_available(self):
+        with tempfile.TemporaryDirectory() as td:
+            target = pathlib.Path(td) / "real.txt"
+            link = pathlib.Path(td) / "link.txt"
+            target.write_text("secret", encoding="utf-8")
+            link.symlink_to(target)
+            # O_NOFOLLOW must refuse opening through the symlink on the final
+            # component — this is the F8 symlink-swap race protection.
+            with self.assertRaises(OSError):
+                _read_text_fp(link)
 
 
 def hashlib_sha1_8(text):
