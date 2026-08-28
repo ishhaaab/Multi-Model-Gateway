@@ -24,9 +24,11 @@ def _load():
         get_allowed_tools_for_agent,
         _resolve_agent,
         _ensure_conversation_agent_binding,
-        _execute_tool,
         _CODE_TOOLS,
     )
+    # _execute_tool is owned by the runtime (the module that runs the loop) and
+    # re-exported by the package — the adapter's copy was deleted as dead code.
+    from app.services.agent.runtime import _execute_tool
     from app.services.tools.registry import Tool, ToolContext, get_tool
     from app.services.router import ChatRequest
     return (settings, get_allowed_tools, get_allowed_tools_for_agent, _resolve_agent,
@@ -309,12 +311,15 @@ class ExecuteToolTests(SetupMixin, unittest.TestCase):
             out = asyncio.run(_execute_tool(tool, "{}", self.ctx))
         self.assertIn("timed out", out)
 
-    def test_handler_exception_is_string(self):
+    def test_handler_exception_is_generic_string(self):
+        """F11: exception detail must NOT leak to the model — it can contain
+        internal hostnames/IPs (e.g. an SSRF guard message). The runtime logs the
+        detail server-side and returns only a generic error string."""
         async def boom(_args, _ctx):
             raise RuntimeError("kaboom")
         tool = Tool(name="boom", description="d", parameters={}, handler=boom, first_party=False)
         out = asyncio.run(_execute_tool(tool, "{}", self.ctx))
-        self.assertEqual(out, "Error: tool 'boom' failed: kaboom")
+        self.assertEqual(out, "Error: tool 'boom' failed")
 
     def test_long_result_truncated(self):
         async def big(_args, _ctx):

@@ -457,6 +457,10 @@ Two-audit sweep of the agent's host-impact surface. Fixed in this commit; OPEN i
 - **F8 (LOW-MED): read/write use unresolved paths; `read_file` runs without the workspace lock** — symlink-swap race with bash. Fix: `O_NOFOLLOW`, lock reads.
 - Sandbox `subprocess.run` timeout doesn't kill detached grandchildren (`sleep 1000 &`); `TimeoutExpired` unhandled → 500. Fix: `start_new_session=True` + process-group kill.
 
+## Agent adapter de-duplication (D4, 2026-08-28)
+
+- **Deleted a dead, divergent `_execute_tool` in `services/agent/agent.py`.** The runtime owns the live loop and the single `_execute_tool` (which carries the F11 fix — generic error strings, no internal-topology leak). The adapter kept a second copy that was never invoked but still echoed exception text (`"failed: {e}"`) — the exact no-locality bug the architecture review flagged (the F11 fix landed in one of two copies). Now there is one implementation, in `runtime.py`, and the tests import it from there and assert the generic message. Removed the adapter's now-unused imports.
+
 ## Memory injection policy implemented (F7 closed, 2026-08-28)
 
 - **F7 (HIGH, integrity) closed at the tool gate.** The four mutating memory tools (`memory_write`, `memory_str_replace`, `memory_append`, `memory_delete`) flipped to deny-by-default (`first_party=False`), matching `bash` and the file tools. They were the only default-allowed mutators in the codebase — a fetched web page could say "write X to `/profile.md`" and the content would be injected verbatim into every future system prompt via tier-1.5. Now the model cannot write memory without an explicit user grant (`PUT /v1/agent/tools/{name}/permission`). `memory_read` stays allowed (reads don't persist injection); `memory_curation` calls the `memory_files` primitives directly and is unaffected.

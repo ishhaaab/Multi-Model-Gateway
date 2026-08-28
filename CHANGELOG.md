@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-08-28 — Agent adapter de-duplication (D4): one `_execute_tool`, no divergent copy
+
+- **Deleted a dead, divergent copy of `_execute_tool` in `services/agent/agent.py`.** The live loop (runtime.py) already owned `_execute_tool` and had the F11 fix (generic error strings, no internal-topology leak). But the adapter kept a second copy that was never called at runtime — yet re-echoed exception text (`f"...failed: {e}"`). This is the exact no-locality failure the report flagged: the F11 fix landed in one of two copies. The dead copy is gone; `_execute_tool` lives only in `runtime.py` and is imported by the tests from there. The test now asserts the **generic** message (`"Error: tool 'boom' failed"`, not `...failed: kaboom`), and cleans up the adapter's now-unused `asyncio`/`time`/`ToolPermission`-accrued imports.
+- The adapter is reduced to setup + SSE framing (DB resolution, allowed-tools view, `AgentRuntimeCtx` build), per ADR-0005.
+
 ## 2026-08-28 — Memory injection policy (D3): default-deny writes, capped/delimited tier-1.5
 
 - **Closes the F7 persistent prompt-injection chain at the tool gate.** The four *mutating* memory tools (`memory_write`, `memory_str_replace`, `memory_append`, `memory_delete`) are now `first_party=False` (deny-by-default), exactly like `bash` and the file tools. They were the only default-allowed mutators in the codebase: a fetched web page could say "write X to `/profile.md`", and unless a user explicitly granted it the page's content was injected verbatim into every future system prompt via tier-1.5. Now the model cannot write memory without an explicit `PUT /v1/agent/tools/{name}/permission` grant. `memory_read` stays default-allowed (reads don't persist injection). `memory_curation` is unaffected — it calls `memory_files` primitives directly, not the gated tool path.

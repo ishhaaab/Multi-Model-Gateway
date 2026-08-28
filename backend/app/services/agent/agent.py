@@ -18,10 +18,8 @@ for this route:
   {"type":"error",       "message"}
   {"type":"done",        "conversation_id"}
 """
-import asyncio
 import json
 import logging
-import time
 
 from openai import APIError
 from sqlalchemy import select
@@ -29,21 +27,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.exceptions import AppError
-from app.core.metrics import record_metrics
-from app.core.background import spawn
 from app.core.stream_guard import release_stream_slot
-from app.db import AsyncSessionLocal
-from app.models.presets import (
-    DEFAULT_TEMPERATURE,
-    DEFAULT_TOP_K,
-    DEFAULT_MIN_P,
-    DEFAULT_REPEAT_PENALTY,
-)
 from app.core.exceptions import ForbiddenError, NotFoundError
+from app.models.presets import DEFAULT_TOP_K, DEFAULT_MIN_P, DEFAULT_REPEAT_PENALTY
 from app.models.tool_permissions import ToolPermission
-from app.services.convo import conversation, load_history, save_messages
-from app.services.memory import store_exchange_memories
-from app.services.memory_curation import enqueue_curation
+from app.services.convo import conversation, load_history
 from app.services.memory_files import safe_build_memory_context
 from app.services.provider_router import ProviderRouter
 from app.services.router import ChatRequest
@@ -137,31 +125,6 @@ async def get_allowed_tools_for_agent(
         return True
 
     return [t for t in registry.all_tools() if _is_allowed(t)]
-
-
-async def _execute_tool(tool: registry.Tool, raw_args: str, ctx: registry.ToolContext) -> str:
-    """Run one tool call. Failures come back as strings so the model can
-    see what went wrong and adapt instead of the whole run dying."""
-    try:
-        args = json.loads(raw_args) if raw_args else {}
-    except ValueError:
-        return "Error: tool arguments were not valid JSON"
-    if not isinstance(args, dict):
-        return "Error: tool arguments must be a JSON object"
-
-    try:
-        result = await asyncio.wait_for(
-            tool.handler(args, ctx), timeout=settings.TOOL_TIMEOUT_SECONDS
-        )
-    except asyncio.TimeoutError:
-        return f"Error: tool '{tool.name}' timed out after {settings.TOOL_TIMEOUT_SECONDS}s"
-    except Exception as e:
-        logger.warning("tool '%s' failed: %r", tool.name, e)
-        return f"Error: tool '{tool.name}' failed: {e}"
-
-    if len(result) > settings.TOOL_RESULT_MAX_CHARS:
-        result = result[: settings.TOOL_RESULT_MAX_CHARS] + "\n[truncated]"
-    return result
 
 
 async def _resolve_agent(request: ChatRequest, user_id: str, db: AsyncSession):
