@@ -339,13 +339,28 @@ class MemoryFilesTests(unittest.TestCase):
                 self.assertIn("aliases: notes", context)
                 self.assertNotIn("some content", context)  # tier 1 is index-only
 
-                # tier 1.5: configured path appended in full
+                # tier 1.5: configured path appended in full (delimited + capped)
                 with patch.object(
                     memory_files.settings, "MEMORY_TIER1_5_PATHS", "/notes.md"
                 ):
                     context15 = await memory_files.build_memory_context(db, self.user_id)
-                self.assertIn("--- /notes.md ---", context15)
+                self.assertIn('<memory_file path="/notes.md">', context15)
                 self.assertIn("some content", context15)
+                self.assertIn("</memory_file>", context15)
+
+                # tier 1.5 injection is byte-capped (defense-in-depth, F7)
+                big = "x" * (memory_files.settings.MEMORY_TIER1_5_INJECT_CAP * 2)
+                await memory_files.memory_write(
+                    db, self.user_id, "/big.md", big, NEW_SENTINEL)
+                with patch.object(
+                    memory_files.settings, "MEMORY_TIER1_5_PATHS", "/big.md"
+                ):
+                    context_big = await memory_files.build_memory_context(db, self.user_id)
+                self.assertIn("[truncated]", context_big)
+                self.assertLess(
+                    len(context_big),
+                    memory_files.settings.MEMORY_TIER1_5_INJECT_CAP + 200,
+                )
         self._run(scenario())
 
     def test_path_validation(self):
@@ -390,7 +405,22 @@ class MemoryToolsRegistryTests(unittest.TestCase):
                      "memory_append", "memory_delete"):
             tool = self.registry.get_tool(name)
             self.assertIsNotNone(tool, f"tool '{name}' not registered")
-            self.assertTrue(tool.first_party)
+
+    def test_mutating_memory_tools_are_deny_by_default(self):
+        """F7: a fetched web page can say 'write X to /profile.md'. If the mutating
+        memory tools were default-allowed the page could plant content that
+        build_memory_context injects verbatim into every future system prompt.
+        Only memory_read is default-allowed (reads don't persist injection);
+        every mutating memory tool requires an explicit user grant."""
+        read = self.registry.get_tool("memory_read")
+        self.assertTrue(read.first_party)
+        for name in ("memory_write", "memory_str_replace", "memory_append",
+                     "memory_delete"):
+            tool = self.registry.get_tool(name)
+            self.assertFalse(
+                tool.first_party,
+                f"{name} must be deny-by-default (first_party=False) — F7",
+            )
 
     def test_handlers_return_error_string_for_invalid_path(self):
         async def scenario():

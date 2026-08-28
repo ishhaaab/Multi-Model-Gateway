@@ -146,6 +146,24 @@ class RegistryTests(unittest.TestCase):
             tool = registry.get_tool(name)
             self.assertIsNotNone(tool, f"tool '{name}' not registered")
 
+    def test_mutating_memory_tools_denied_by_default(self):
+        """F7 regression: a fetched web page can say 'write X to /profile.md'. If
+        the mutating memory tools were default-allowed the page could plant
+        content that build_memory_context injects verbatim into every future
+        system prompt. Only memory_read is default-allowed (reads don't persist
+        injection); every mutating memory tool requires an explicit user grant."""
+        read = registry.get_tool("memory_read")
+        self.assertIsNotNone(read)
+        self.assertTrue(read.first_party)
+        for name in ("memory_write", "memory_str_replace", "memory_append",
+                     "memory_delete"):
+            tool = registry.get_tool(name)
+            self.assertIsNotNone(tool, f"tool '{name}' not registered")
+            self.assertFalse(
+                tool.first_party,
+                f"{name} must be deny-by-default (first_party=False) — F7",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

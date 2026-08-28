@@ -231,6 +231,13 @@ register(Tool(
     handler=_memory_read,
 ))
 
+# The mutating memory_* tools are deny-by-default (first_party=False), exactly like
+# bash and the file tools. A fetched web page can say "write X to /profile.md";
+# if memory_write were default-allowed the page could plant content that
+# build_memory_context injects verbatim into every future system prompt — the F7
+# persistent prompt-injection chain. Under deny-by-default the model can only write
+# memory if the user explicitly grants it (PUT /v1/agent/tools/{name}/permission),
+# which degrades the chain to "user has already opted into this tool".
 register(Tool(
     name="memory_write",
     description=(
@@ -257,6 +264,7 @@ register(Tool(
         "required": ["path", "content", "if_version"],
     },
     handler=_memory_write,
+    first_party=False,
 ))
 
 register(Tool(
@@ -278,6 +286,7 @@ register(Tool(
         "required": ["path", "old_str", "new_str", "if_version"],
     },
     handler=_memory_str_replace,
+    first_party=False,
 ))
 
 register(Tool(
@@ -297,6 +306,7 @@ register(Tool(
         "required": ["path", "content", "if_version"],
     },
     handler=_memory_append,
+    first_party=False,
 ))
 
 register(Tool(
@@ -314,4 +324,5 @@ register(Tool(
         "required": ["path", "if_version"],
     },
     handler=_memory_delete,
+    first_party=False,
 ))

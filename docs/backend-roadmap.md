@@ -454,9 +454,14 @@ Two-audit sweep of the agent's host-impact surface. Fixed in this commit; OPEN i
 
 - **F1/C2 (CRITICAL): bash is not confined to the caller's workspace** — the `workspaces` volume holds ALL users; `bash -lc` can read/write every one (`sandbox/app.py:26-44`). Fix shape: per-exec mount namespace exposing only `/workspaces/{user}/{agent}`, or per-user volumes.
 - **F9 (HIGH): bash bypasses the workspace disk quota** (`store.py` quota only gates file-tool writes; `.git` excluded from `du`) — host-disk exhaustion. Fix: post-exec `du` enforcement + count `.git`.
-- **F7 (HIGH, integrity): memory_* writes are default-allowed and tier-1.5 files inject verbatim into every future prompt** — a fetched web page can plant persistent prompt injection. Fix: default-deny `memory_write/append/str_replace/delete`, or sanitize tier-1.5.
 - **F8 (LOW-MED): read/write use unresolved paths; `read_file` runs without the workspace lock** — symlink-swap race with bash. Fix: `O_NOFOLLOW`, lock reads.
 - Sandbox `subprocess.run` timeout doesn't kill detached grandchildren (`sleep 1000 &`); `TimeoutExpired` unhandled → 500. Fix: `start_new_session=True` + process-group kill.
+
+## Memory injection policy implemented (F7 closed, 2026-08-28)
+
+- **F7 (HIGH, integrity) closed at the tool gate.** The four mutating memory tools (`memory_write`, `memory_str_replace`, `memory_append`, `memory_delete`) flipped to deny-by-default (`first_party=False`), matching `bash` and the file tools. They were the only default-allowed mutators in the codebase — a fetched web page could say "write X to `/profile.md`" and the content would be injected verbatim into every future system prompt via tier-1.5. Now the model cannot write memory without an explicit user grant (`PUT /v1/agent/tools/{name}/permission`). `memory_read` stays allowed (reads don't persist injection); `memory_curation` calls the `memory_files` primitives directly and is unaffected.
+- **Read-side defense-in-depth:** `build_memory_context` caps each tier-1.5 file at `MEMORY_TIER1_5_INJECT_CAP` (2000) bytes and wraps it in `<memory_file ...>`/`</memory_file>` delimiters (was `--- path ---`), so injected content can't be mistaken for prompt structure.
+- Tests: `test_agent_adapter.py::MemoryToolDefaultDenyTests` (offline via `import_with_stubs`); `test_memory_files.py` tier-1.5 delimiter + cap.
 
 ## Egress seam implemented (F5/F6 closed, 2026-08-28)
 

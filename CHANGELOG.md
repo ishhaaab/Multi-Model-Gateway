@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-28 — Memory injection policy (D3): default-deny writes, capped/delimited tier-1.5
+
+- **Closes the F7 persistent prompt-injection chain at the tool gate.** The four *mutating* memory tools (`memory_write`, `memory_str_replace`, `memory_append`, `memory_delete`) are now `first_party=False` (deny-by-default), exactly like `bash` and the file tools. They were the only default-allowed mutators in the codebase: a fetched web page could say "write X to `/profile.md`", and unless a user explicitly granted it the page's content was injected verbatim into every future system prompt via tier-1.5. Now the model cannot write memory without an explicit `PUT /v1/agent/tools/{name}/permission` grant. `memory_read` stays default-allowed (reads don't persist injection). `memory_curation` is unaffected — it calls `memory_files` primitives directly, not the gated tool path.
+- **Defense-in-depth on the read side:** `build_memory_context` now caps each tier-1.5 file's injected byte length (`MEMORY_TIER1_5_INJECT_CAP`, default 2000) and wraps it in `<memory_file path="...">`/`</memory_file>` delimiters instead of the old `--- path ---` header, so injected content can't be mistaken for prompt structure or dominate the context.
+- **Tests:** `test_agent_adapter.py::MemoryToolDefaultDenyTests` (3 cases, run offline via `import_with_stubs`) — `memory_read` stays allowed, all four mutating tools are deny-by-default, and `get_allowed_tools` surfaces no mutating memory tool for a real user with no grants. `test_memory_files.py` tier-1.5 test updated to the new delimiter + a byte-cap assertion.
+
 ## 2026-08-28 — Egress seam (D1): one deep module owns every outbound HTTP call
 
 New `services/egress.py` is the single place the backend reaches the network. It owns the SSRF guard and the response byte cap, so a contributor cannot (and does not) skip them:

@@ -86,6 +86,7 @@ class Settings(BaseSettings):
     # the file moved underneath it.
     MEMORY_FILE_CAP_BYTES: int = 32768   # per-file cap; writes at/over cap are rejected, never truncated
     MEMORY_TIER1_5_PATHS: str = "/profile.md,/preferences.md"   # always-injected full files (comma-separated)
+    MEMORY_TIER1_5_INJECT_CAP: int = 2000  # per-file byte cap on tier-1.5 injection (defense-in-depth, F7)
     # Background curation (M2): the arq job reads the last N transcript messages
     # and proposes memory-file ops; the batch model prefers this provider role.
     MEMORY_CURATION_MAX_MESSAGES: int = 20   # transcript window fed to the curator

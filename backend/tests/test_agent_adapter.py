@@ -292,7 +292,6 @@ class EnsureBindingTests(SetupMixin, unittest.TestCase):
 class ExecuteToolTests(SetupMixin, unittest.TestCase):
     def setUp(self):
         self.ctx = ToolContext(user_id="u1", conversation_id="c1", db=MagicMock())
-
     def test_invalid_json_is_error(self):
         out = asyncio.run(_execute_tool(_tool("t"), "not json", self.ctx))
         self.assertEqual(out, "Error: tool arguments were not valid JSON")
@@ -325,6 +324,55 @@ class ExecuteToolTests(SetupMixin, unittest.TestCase):
             out = asyncio.run(_execute_tool(tool, "{}", self.ctx))
         self.assertTrue(out.endswith("\n[truncated]"))
         self.assertLessEqual(len(out), 50 + len("\n[truncated]"))
+
+
+class MemoryToolDefaultDenyTests(SetupMixin, unittest.TestCase):
+    """F7 regression on the REAL registry (loaded through the stubs helper, so it
+    runs on a host without asyncpg). A fetched web page can say 'write X to
+    /profile.md'; if the mutating memory tools were default-allowed the page could
+    plant content that build_memory_context injects verbatim into every future
+    system prompt. Only memory_read is default-allowed (reads don't persist
+    injection); every mutating memory tool must require an explicit user grant."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from app.services.tools import registry as real_registry
+        except Exception as exc:  # noqa: BLE001
+            raise unittest.SkipTest(f"real registry unavailable: {exc}")
+        super().setUpClass()
+        cls.registry = real_registry
+
+    def test_memory_read_is_default_allowed(self):
+        self.assertTrue(self.registry.get_tool("memory_read").first_party)
+
+    def test_mutating_memory_tools_are_deny_by_default(self):
+        for name in ("memory_write", "memory_str_replace", "memory_append",
+                     "memory_delete"):
+            tool = self.registry.get_tool(name)
+            self.assertIsNotNone(tool, f"tool '{name}' not registered")
+            self.assertFalse(
+                tool.first_party,
+                f"{name} must be deny-by-default (first_party=False) — F7",
+            )
+
+    def test_memory_writes_not_in_default_allowlist_for_real_user(self):
+        # With no explicit grants, get_allowed_tools must NOT surface any mutating
+        # memory tool — proving the injection chain is broken at the tool gate by
+        # default (a user must opt in via PUT /agent/tools/{name}/permission).
+        tools = [
+            _tool("memory_read", first_party=True),
+            _tool("memory_write", first_party=False),
+            _tool("memory_str_replace", first_party=False),
+            _tool("memory_append", first_party=False),
+            _tool("memory_delete", first_party=False),
+        ]
+        with _RegistryToolsStub(tools):
+            allowed = asyncio.run(get_allowed_tools("u1", _db({"permission": []})))
+        names = {t.name for t in allowed}
+        self.assertIn("memory_read", names)
+        for n in ("memory_write", "memory_str_replace", "memory_append", "memory_delete"):
+            self.assertNotIn(n, names)  # no grant, no write capability
 
 
 if __name__ == "__main__":

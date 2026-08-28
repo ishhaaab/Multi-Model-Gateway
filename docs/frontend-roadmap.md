@@ -32,6 +32,13 @@ frontend as the primary client. The web frontend stays as-is for reference/deskt
   (`?? convoIdRef.current`), so no UI change is required — but any new parser must accept a null
   id on the terminal `done` event rather than dropping the frame.
 
+- **Mutating `memory_*` tools are now deny-by-default (F7).** `GET /v1/agent/tools` reports
+  `first_party: false` for `memory_write`, `memory_str_replace`, `memory_append`, and
+  `memory_delete`, so the agent is no longer *offered* them unless the user grants them via
+  `PUT /v1/agent/tools/{name}/permission` (the tools panel already exposes this grant). A client
+  showing "memory tools" as always-on should now surface them as grant-required. `memory_read`
+  is unchanged (still allowed by default).
+
 The backend now supports **bring-your-own-key providers** — user-configured provider rows with
 encrypted keys, routed through the same chat/agent/research paths with a legacy env-var
 fallback. The contract additions the mobile app must handle:

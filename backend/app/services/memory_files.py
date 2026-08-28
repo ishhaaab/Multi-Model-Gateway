@@ -354,7 +354,16 @@ async def build_memory_context(db: AsyncSession, user_id: str, agent_id: str | N
     for configured in _tier1_5_paths():
         current = await memory_read(db, user_id, configured)
         if current is not None:
-            sections.append(f"--- {configured} ---\n{current['content']}")
+            content = current["content"] or ""
+            # Defense-in-depth (F7): a tier-1.5 file is injected verbatim into the
+            # system prompt. Cap its byte length so a large/compressed file can't
+            # dominate the context or smuggle a huge payload, and delimit it so
+            # injected content can't be mistaken for prompt structure.
+            if len(content) > settings.MEMORY_TIER1_5_INJECT_CAP:
+                content = content[: settings.MEMORY_TIER1_5_INJECT_CAP] + "\n[truncated]"
+            sections.append(
+                f"<memory_file path=\"{configured}\">\n{content}\n</memory_file>"
+            )
 
     return "User memory files:\n" + "\n\n".join(sections)
 
