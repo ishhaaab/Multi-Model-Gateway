@@ -163,6 +163,23 @@ class GetAllowedToolsTests(SetupMixin, unittest.TestCase):
         self.assertIn("a", names)
         self.assertNotIn("b", names)
 
+    def test_master_switch_gates_global_path(self):
+        """Regression (C2): the legacy global path must apply the same
+        ENABLE_CODE_EXECUTION ceiling as the agent path. A user could
+        self-grant write_file via PUT /agent/tools/{name}/permission and then
+        chat without an agent_id to bypass the switch entirely."""
+        tools = [_tool("write_file", first_party=False), _tool("recall", first_party=True)]
+        with _RegistryToolsStub(tools):
+            # Switch OFF: write_file dropped even though it was granted; the
+            # non-code tool (recall) is unaffected.
+            with patch.object(settings, "ENABLE_CODE_EXECUTION", False):
+                allowed = asyncio.run(get_allowed_tools("u1", _db({"permission": [_FakePermission("write_file", True), _FakePermission("recall", True)]})))
+            self.assertEqual({t.name for t in allowed}, {"recall"})
+            # Switch ON: the code tool returns.
+            with patch.object(settings, "ENABLE_CODE_EXECUTION", True):
+                allowed = asyncio.run(get_allowed_tools("u1", _db({"permission": [_FakePermission("write_file", True), _FakePermission("recall", True)]})))
+        self.assertEqual({t.name for t in allowed}, {"write_file", "recall"})
+
 
 class GetAllowedToolsForAgentTests(SetupMixin, unittest.TestCase):
     def test_intersection_of_agent_request_and_ceiling(self):

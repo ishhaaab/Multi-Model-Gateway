@@ -62,20 +62,33 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
-async def get_allowed_tools(user_id: str, db: AsyncSession) -> list[registry.Tool]:
-    """Per-tenant policy: an explicit grant/deny row wins; otherwise
-    first-party tools are allowed and MCP tools are denied."""
-    result = await db.execute(
-        select(ToolPermission).where(ToolPermission.user_id == user_id)
-    )
-    overrides = {row.tool_name: row.allowed for row in result.scalars().all()}
-    return [t for t in registry.all_tools() if overrides.get(t.name, t.first_party)]
-
-
 # Code-execution tools gated by the master switch (Q8 C). When
 # ENABLE_CODE_EXECUTION is False these are never offered, even if the
 # per-user ToolPermission says allowed — the switch is the hard ceiling.
 _CODE_TOOLS = frozenset({"bash", "edit_patch", "edit_lines", "write_file"})
+
+
+def _ceiling_allows(tool: registry.Tool) -> bool:
+    """Master-switch ceiling: code-execution tools are gated by
+    ENABLE_CODE_EXECUTION. Applied on EVERY allowlist path — including the
+    legacy global path (get_allowed_tools) — so a user can't self-grant
+    write_file via PUT /agent/tools/{name}/permission and then chat without an
+    agent_id to bypass the switch (files tools are not sandbox-mediated)."""
+    return not (tool.name in _CODE_TOOLS and not settings.ENABLE_CODE_EXECUTION)
+
+
+async def get_allowed_tools(user_id: str, db: AsyncSession) -> list[registry.Tool]:
+    """Per-tenant policy: an explicit grant/deny row wins; otherwise
+    first-party tools are allowed and MCP tools are denied. The master-switch
+    ceiling is applied here too, so this path cannot leak code-execution tools."""
+    result = await db.execute(
+        select(ToolPermission).where(ToolPermission.user_id == user_id)
+    )
+    overrides = {row.tool_name: row.allowed for row in result.scalars().all()}
+    return [
+        t for t in registry.all_tools()
+        if overrides.get(t.name, t.first_party) and _ceiling_allows(t)
+    ]
 
 
 async def get_allowed_tools_for_agent(
@@ -118,8 +131,8 @@ async def get_allowed_tools_for_agent(
             return False
         if not overrides.get(tool.name, tool.first_party):
             return False
-        # Master switch gates code-execution tools
-        if tool.name in _CODE_TOOLS and not settings.ENABLE_CODE_EXECUTION:
+        # Master switch gates code-execution tools (shared helper — one source)
+        if not _ceiling_allows(tool):
             return False
         return True
 
@@ -196,10 +209,12 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
 
     conversation_id = None
     # `run_agent` is itself the StreamingResponse generator — it must also own
-    # stream_guard release on paths that fail *before* the runtime starts
-    # streaming (e.g. resolve_agent 404/403). Runtime owns the in-loop finally,
-    # but early errors need a local guard here.
-    # We track whether we ever entered the runtime's generator.
+    # release of the stream slot acquired by the router for every path: normal
+    # completion, runtime-internal errors (the runtime swallows them and yields
+    # error+done, so the `async for` below completes normally), mid-run raises
+    # (re-raised after entered_runtime), and client disconnect. release_stream_slot
+    # is idempotent (never goes negative) and the router acquires exactly once,
+    # so an unconditional release in `finally` is correct and cannot double-free.
     entered_runtime = False
     try:
         conversation_id = await conversation(request, user_id, db)
@@ -293,8 +308,12 @@ async def run_agent(request: ChatRequest, user_id: str, preset, db: AsyncSession
         else:
             raise
     finally:
-        if not entered_runtime:
-            try:
-                await release_stream_slot(user_id)
-            except Exception:
-                pass
+        # Always release: the router acquires exactly one slot and the runtime
+        # never releases it (it doesn't even import release_stream_slot). The
+        # old `if not entered_runtime` guard leaked the slot on every successful
+        # and every mid-run-failed agent chat, hard-429ing the user after
+        # MAX_CONCURRENT_STREAMS runs.
+        try:
+            await release_stream_slot(user_id)
+        except Exception:
+            pass

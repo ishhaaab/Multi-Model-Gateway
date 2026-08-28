@@ -573,6 +573,15 @@ The tailnet-hardening follow-ups from Phase 1, landed together with the S2/S3 wo
   `test_agent.py` / `test_agent_runtime.py` now consistently run (they previously could skip
   via a stale-guard ordering side effect).
 
+## Agent stream lifecycle, capability gate, memory rollback (architecture review C1/C2/C4)
+
+A review pass (repowise + cluster audits) surfaced three defects beyond the tracked roadmap items; all fixed in one commit.
+
+- **Agent stream-slot leak.** `services/agent/agent.py::run_agent` released the per-user stream slot only `if not entered_runtime`, so every successful (and mid-run-failed) agent chat leaked a slot — after `MAX_CONCURRENT_STREAMS` runs a user was hard-429'd until backend restart. The `finally` now releases unconditionally, matching `routers/chat.py`'s outer `stream_tokens` wrapper and `routers/research.py`'s router-level try/finally. `release_stream_slot` is idempotent (never negative), so an unconditional release can't double-free. The runtime never imports `release_stream_slot` — the adapter owns the lifecycle.
+- **Capability-gate bypass on the global tool path.** CONTEXT.md defines a Capability as requiring both a master switch and a per-user grant. The legacy `get_allowed_tools` (used when no `agent_id`) applied only the permission row, while `get_allowed_tools_for_agent` added the `ENABLE_CODE_EXECUTION` ceiling. A user could `PUT /v1/agent/tools/{name}/permission` for `write_file`/`edit_patch`/`edit_lines` then chat **without** `agent_id` to get real filesystem writes with the switch off (file tools aren't sandbox-mediated). A shared `_ceiling_allows()` helper now gates both allowlist paths. The self-grant endpoint (`routers/agent.py`) still accepts any registered tool name — that's tracked separately (capability-class screening on the Tool schema is a future C2 follow-up).
+- **`safe_build_memory_context` didn't roll back.** On the swallow path it logged and returned `""` without `await db.rollback()`. A failed SQL statement poisons an asyncpg transaction, and both chat.py and agent.py run further queries on that same session after this call → `PendingRollbackError` (neither `AppError`/`APIError`), crashing the chat stream / generic 500 in the agent. Now matches `memory.py::retrieve_memories`'s `await db.rollback()`.
+- **Agent SSE `done.conversation_id` drift.** The backend emits `{"type":"done","conversation_id":null}` on pre-runtime 404/403; the frontend `agent-events.ts` guard (`typeof === "string"`) dropped that terminal frame. Union widened to `string | null`; consumers already null-coalesce.
+
 ## Reliability fixes implemented (R1 + R2)
 
 The agent-loop reliability pass from Phase 2, landed together.

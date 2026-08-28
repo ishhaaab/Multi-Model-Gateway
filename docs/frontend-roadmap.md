@@ -25,6 +25,13 @@ frontend as the primary client. The web frontend stays as-is for reference/deskt
 
 ## Backend contract additions (from backend Phase 1 + 1b)
 
+- **Agent SSE `done.conversation_id` is now `string | null`** — the backend emits
+  `{"type":"done","conversation_id":null}` when the agent 404s/403s before the runtime starts
+  (e.g. a non-existent or foreign agent). The typed union in `lib/agent-events.ts` (ADR-0007)
+  widens it to `string | null`; the consumer in `use-agent.ts` already null-coalesces
+  (`?? convoIdRef.current`), so no UI change is required — but any new parser must accept a null
+  id on the terminal `done` event rather than dropping the frame.
+
 The backend now supports **bring-your-own-key providers** — user-configured provider rows with
 encrypted keys, routed through the same chat/agent/research paths with a legacy env-var
 fallback. The contract additions the mobile app must handle:

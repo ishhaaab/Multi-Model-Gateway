@@ -76,6 +76,28 @@ class StreamGuardTests(unittest.TestCase):
 
         self.loop.run_until_complete(scenario())
 
+    def test_release_is_stable_for_unconditional_finally(self):
+        """Regression: the agent stream generator releases unconditionally in
+        its `finally`, including on paths where the acquire happened in the
+        router but the generator never ran (or ran and mid-raised). Releasing
+        when no slot is held must be a no-op, never negative — so an
+        unconditional release cannot double-free a slot."""
+        async def scenario():
+            # Release with nothing held: must not go negative or resurrect a key.
+            await stream_guard.release_stream_slot("eve")
+            self.assertNotIn("eve", stream_guard._active)
+
+            # Acquire once, release twice (the generator's finally + a stray
+            # call): the second release must still leave the user free to reuse.
+            with patch("app.core.stream_guard.settings.MAX_CONCURRENT_STREAMS", 1):
+                await stream_guard.acquire_stream_slot("eve")
+                await stream_guard.release_stream_slot("eve")
+                await stream_guard.release_stream_slot("eve")
+                await stream_guard.acquire_stream_slot("eve")
+                self.assertEqual(stream_guard._active.get("eve"), 1)
+
+        self.loop.run_until_complete(scenario())
+
     def test_release_never_goes_negative(self):
         async def scenario():
             # releasing with nothing held is a no-op, not a negative count

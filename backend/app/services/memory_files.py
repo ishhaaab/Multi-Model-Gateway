@@ -361,9 +361,18 @@ async def build_memory_context(db: AsyncSession, user_id: str, agent_id: str | N
 
 async def safe_build_memory_context(db: AsyncSession, user_id: str, agent_id: str | None = None) -> str:
     """Best-effort wrapper for prompt injection: a memory failure must never
-    fail a chat/agent request — log a warning and inject nothing."""
+    fail a chat/agent request — log a warning and inject nothing.
+
+    Must also clear the failed transaction state so the session stays usable:
+    a failed SQL statement poisons an asyncpg transaction, and both callers
+    (chat.py, agent/agent.py) run further queries on this same session after
+    this call — without the rollback those raise PendingRollbackError, which
+    is neither an AppError nor an APIError and crashes the stream. Mirrors the
+    `await db.rollback()` in memory.py:retrieve_memories.
+    """
     try:
         return await build_memory_context(db, user_id, agent_id=agent_id)
     except Exception:
         logger.warning("build_memory_context failed; skipping memory injection", exc_info=True)
+        await db.rollback()  # clear the failed transaction state so the session stays usable
         return ""

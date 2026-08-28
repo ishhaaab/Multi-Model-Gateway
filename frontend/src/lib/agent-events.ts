@@ -1,7 +1,8 @@
 /** AgentEvents - the typed SSE contract for POST /v1/agent/chat (#4).
 
 One discriminated union. One parser from raw SSE `data:` payload to that union.
-The transport (api-client's _parseSseData) stays generic; this module is where
+The transport (api-client) and the generic SSE codec (sse-events.ts's
+parseSseJson) stay protocol-agnostic; this module is where
 File Edit's {edit_id, path} shape gets named and extracted — so ToolStepCard
 and use-agent stop re-parsing JSON and stop falling back to an "ok " prefix.
 
@@ -21,7 +22,7 @@ export type AgentEvent =
   | { type: "tool_result"; id: string; name: string; content: string }
   | { type: "token"; content: string }
   | { type: "error"; message: string }
-  | { type: "done"; conversation_id: string; truncated?: boolean; agent_id?: string; agent_version?: number };
+  | { type: "done"; conversation_id: string | null; truncated?: boolean; agent_id?: string; agent_version?: number };
 
 const FILE_EDIT_TOOLS = new Set(["edit_patch", "edit_lines", "write_file"]);
 
@@ -71,6 +72,6 @@ export function parseAgentEvent(raw: unknown): AgentEvent | null {
   if (t === "tool_result" && typeof r.id === "string" && typeof r.name === "string" && typeof r.content === "string") return r as AgentEvent;
   if (t === "token" && typeof r.content === "string") return r as AgentEvent;
   if (t === "error" && typeof r.message === "string") return r as AgentEvent;
-  if (t === "done" && typeof r.conversation_id === "string") return r as AgentEvent;
+  if (t === "done" && (typeof r.conversation_id === "string" || r.conversation_id === null)) return r as AgentEvent;
   return null;
 }
