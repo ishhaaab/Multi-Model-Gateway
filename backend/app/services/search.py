@@ -4,52 +4,23 @@ and the deep-research orchestrator.
 Search uses a self hosted SearXNG instance when SEARXNG_URL is set,
 otherwise DuckDuckGo's HTML endpoint cus no API key needed :).
 """
-import asyncio
 import html as html_lib
-import ipaddress
+import json
 import logging
 import re
-import socket
 from urllib.parse import parse_qs, urlsplit
-
-import httpx
 
 from app.core.config import settings
 from app.core.metrics import search_degraded_total
+from app.services.egress import Policy, fetch, fetch_text
 
 logger = logging.getLogger(__name__)
 
-# Hard cap on redirect hops we'll follow (each one is re-validated for SSRF).
-_MAX_REDIRECTS = 5
-
-
-class UnsafeURLError(Exception):
-    """Raised when a fetch target resolves to a non-public address (SSRF guard)."""
-
-
-async def _assert_public_host(host: str) -> None:
-    """Resolve `host` and refuse if ANY resolved address is private, loopback,
-    link-local, reserved, multicast, or the cloud-metadata IP. Runs before every
-    connection (initial URL and each redirect hop) so a public host can't redirect
-    into the internal network. DNS resolution is offloaded so it can't block the loop."""
-    if not host:
-        raise UnsafeURLError("missing host")
-    try:
-        infos = await asyncio.get_running_loop().getaddrinfo(host, None)
-    except socket.gaierror as e:
-        raise UnsafeURLError(f"could not resolve host '{host}'") from e
-    for info in infos:
-        addr = info[4][0]
-        ip = ipaddress.ip_address(addr)
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local      # covers 169.254.0.0/16 incl. cloud metadata
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
-            raise UnsafeURLError(f"refusing to fetch non-public address {addr} (host '{host}')")
+# the SSRF guard lives in app.services.egress now (F5/F6): `fetch_page` pins the
+# resolved IP and streams a capped body; the search backends go through the same
+# seam so a user-supplied query cannot bypass the guard. Removing the local
+# resolve/validate here means a future caller cannot skip the guard (it can only
+# go through egress).
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _SCRIPT_RE = re.compile(r"<(script|style|noscript|svg|head)\b.*?</\1>", re.S | re.I)
@@ -75,13 +46,17 @@ def _resolve_ddg_url(href: str) -> str:
 
 
 async def _searxng(query: str, limit: int) -> list[dict]:
-    async with httpx.AsyncClient(timeout=15) as client:
-        response = await client.get(
-            f"{settings.SEARXNG_URL.rstrip('/')}/search",
-            params={"q": query, "format": "json"},
-        )
-        response.raise_for_status()
-    results = response.json().get("results", [])
+    # SEARXNG_URL is a configured host (may be internal) — policy INTERNAL.
+    raw = await fetch(
+        f"{settings.SEARXNG_URL.rstrip('/')}/search",
+        policy=Policy.INTERNAL,
+        params={"q": query, "format": "json"},
+    )
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        data = {}
+    results = data.get("results", []) if isinstance(data, dict) else []
     if not results:
         # a 200 with zero hits is a degraded search, not a success (R6)
         logger.warning("SearXNG returned zero results for query '%s'", query)
@@ -93,13 +68,13 @@ async def _searxng(query: str, limit: int) -> list[dict]:
 
 
 async def _duckduckgo(query: str, limit: int) -> list[dict]:
-    async with httpx.AsyncClient(
-        timeout=15, headers={"User-Agent": _USER_AGENT}, follow_redirects=True,
-    ) as client:
-        response = await client.post("https://html.duckduckgo.com/html/", data={"q": query})
-        response.raise_for_status()
-
-    page = response.text
+    # html.duckduckgo.com is a fixed public host — policy INTERNET.
+    page = await fetch_text(
+        "https://html.duckduckgo.com/html/",
+        policy=Policy.INTERNET,
+        method="POST",
+        form={"q": query},
+    )
     titles = _DDG_TITLE_RE.findall(page)
     if not titles:
         # 200 with no result links: DDG quietly degraded (rate-limited page,
@@ -127,33 +102,27 @@ async def search(query: str, limit: int | None = None) -> list[dict]:
 
 async def fetch_page(url: str, max_chars: int | None = None) -> str:
     """Fetch a URL and return its visible text (tags stripped, whitespace
-    collapsed), truncated to max_chars."""
+    collapsed), truncated to max_chars.
+
+    Delegates to services.egress (policy=internet) so the SSRF guard + pinned-IP
+    connect (F5) + byte-capped body (F6) cannot be skipped. EgressError is mapped
+    to a generic string; callers (research) catch Exception and fall back to a
+    snippet, so a refusal simply means "no content".
+    """
+    from app.services.egress import EgressError
+
     max_chars = max_chars or settings.RESEARCH_PAGE_MAX_CHARS
-    # follow_redirects=False so we re-validate every hop ourselves — auto-follow
-    # and SSRF protection are mutually exclusive (a public URL can 302 to an internal one).
-    async with httpx.AsyncClient(
-        timeout=20, headers={"User-Agent": _USER_AGENT}, follow_redirects=False,
-    ) as client:
-        current = url
-        for _ in range(_MAX_REDIRECTS + 1):
-            parsed = urlsplit(current)
-            if parsed.scheme not in ("http", "https"):
-                raise UnsafeURLError(f"unsupported scheme '{parsed.scheme}'")
-            await _assert_public_host(parsed.hostname or "")
-            response = await client.get(current)
-            if response.is_redirect and response.next_request is not None:
-                current = str(response.next_request.url)  # httpx resolves relative Location
-                continue
-            break
-        else:
-            raise UnsafeURLError("too many redirects")
-        response.raise_for_status()
+    try:
+        raw = await fetch_text(url, policy=Policy.INTERNET)
+    except EgressError as exc:
+        logger.warning("fetch_page refused for %s: %s", url, exc)
+        return ""
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fetch_page failed for %s: %r", url, exc)
+        return ""
 
-    content_type = response.headers.get("content-type", "")
-    if "html" not in content_type and "text" not in content_type:
-        return f"(unsupported content type: {content_type})"
-
-    text = _SCRIPT_RE.sub(" ", response.text)
+    # Strip tags/scripts, collapse whitespace, truncate.
+    text = _SCRIPT_RE.sub(" ", raw)
     text = _TAG_RE.sub(" ", text)
     text = html_lib.unescape(text)
     text = _WS_RE.sub(" ", text)

@@ -455,10 +455,18 @@ Two-audit sweep of the agent's host-impact surface. Fixed in this commit; OPEN i
 - **F1/C2 (CRITICAL): bash is not confined to the caller's workspace** — the `workspaces` volume holds ALL users; `bash -lc` can read/write every one (`sandbox/app.py:26-44`). Fix shape: per-exec mount namespace exposing only `/workspaces/{user}/{agent}`, or per-user volumes.
 - **F9 (HIGH): bash bypasses the workspace disk quota** (`store.py` quota only gates file-tool writes; `.git` excluded from `du`) — host-disk exhaustion. Fix: post-exec `du` enforcement + count `.git`.
 - **F7 (HIGH, integrity): memory_* writes are default-allowed and tier-1.5 files inject verbatim into every future prompt** — a fetched web page can plant persistent prompt injection. Fix: default-deny `memory_write/append/str_replace/delete`, or sanitize tier-1.5.
-- **F5 (MED-HIGH): DNS-rebinding TOCTOU in `fetch_page`** — host validated at resolve time, connected at a later re-resolution. Fix: pin the validated IP at connect (custom httpx transport).
-- **F6 (MEDIUM): `fetch_page` buffers the full response body** before truncation — gzip-bomb OOM. Fix: stream with a byte cap.
 - **F8 (LOW-MED): read/write use unresolved paths; `read_file` runs without the workspace lock** — symlink-swap race with bash. Fix: `O_NOFOLLOW`, lock reads.
 - Sandbox `subprocess.run` timeout doesn't kill detached grandchildren (`sleep 1000 &`); `TimeoutExpired` unhandled → 500. Fix: `start_new_session=True` + process-group kill.
+
+## Egress seam implemented (F5/F6 closed, 2026-08-28)
+
+New deep module `services/egress.py` is now the ONLY way the backend makes an outbound HTTP request. It owns the SSRF guard and byte cap, so a future caller cannot skip them:
+
+- **F5 (MED-HIGH): DNS-rebinding TOCTOU closed** — `fetch_page` resolved the host, validated it, then re-resolved at connect time. Egress resolves ONCE, validates, and **pins the connect to that validated IP** while preserving the original hostname for the Host header and TLS SNI (verified for both HTTP and HTTPS: TLS cert + SNI survive). A DNS answer that changes between resolve and connect can no longer funnel a public URL into the internal network.
+- **F6 (MEDIUM): response-buffer OOM closed** — `fetch_page` buffered the whole body before truncating; a gzip-bomb could OOM the worker. Egress streams the body through a byte cap (decoded length, so `Content-Length` lies are caught too) and aborts past the cap.
+- **Two policy tiers (the seam is real, >1 adapter):** `INTERNET` (public-only, default — used by `fetch_page`, DuckDuckGo), `INTERNAL` (no SSRF check for configured internal endpoints like SearXNG), and `PRIVATE_ALLOWED` (public check but permits private/loopback for locked-down deployments pointing SearXNG internal).
+- **`search.py` now delegates both its backends and `fetch_page` to egress** — the local `_assert_public_host`/resolve/validate copy is deleted. Egress raises `EgressError` (generic message, F11-consistent: no internal IPs/hostnames leak to the model); `fetch_page` maps refusals to `""` and callers (research) fall back to a snippet.
+- **Tests:** `tests/test_egress.py` (12 cases) proving SSRF refusal (private/loopback/link-local-metadata), pin-connect to the validated IP with Host-header preservation, byte-cap abort + under-cap pass, redirect re-validation to a hostile internal host, both policy tiers, and search-backend routing (GET+params / POST+form).
 
 ## Security/correctness fixes implemented (workspace store)
 

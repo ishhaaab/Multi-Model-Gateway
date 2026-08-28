@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-28 — Egress seam (D1): one deep module owns every outbound HTTP call
+
+New `services/egress.py` is the single place the backend reaches the network. It owns the SSRF guard and the response byte cap, so a contributor cannot (and does not) skip them:
+
+- **Closes F5 (DNS-rebinding TOCTOU):** every outbound request now resolves its hostname ONCE, validates it, and connects to that exact validated IP while preserving the original hostname for the Host header and TLS SNI — verified for both HTTP and HTTPS (TLS cert + SNI survive). A DNS answer that changes between the resolve and the connect can no longer redirect a public URL into the internal network.
+- **Closes F6 (response-buffer OOM):** the body is streamed through a byte cap that counts the *decoded* length, so a gzip-bomb (or a `Content-Length` lie) is aborted mid-stream instead of buffered into memory.
+- **Policy tiers (the seam is real, >1 adapter):** `INTERNET` (public-only, default — used by `fetch_page`, DuckDuckGo), `INTERNAL` (no SSRF check for configured internal endpoints like SearXNG), `PRIVATE_ALLOWED` (public check, but permits private/loopback for locked-down deployments). `EgressError` carries a generic message — no internal IPs/hostnames reach the model (F11-consistent).
+- **`search.py` delegates both backends + `fetch_page` to egress.** The local `_assert_public_host` / resolve / validate copy is deleted (it was the "one guarded caller" that every future fetch site would have copied). `fetch_page` maps refusals to `""`; research falls back to a snippet.
+- **Tests:** `tests/test_egress.py` (12 cases) — SSRF refusal (private/loopback/link-local-metadata), pin-connect to the validated IP with Host-header preservation, byte-cap abort + under-cap pass, redirect re-validation to a hostile internal host, both policy tiers, and search-backend routing (GET+params, POST+form).
+
 ## 2026-08-28 — Security sweep fixes: sandbox secrets/egress, git-hook hardening, tool leaks
 
 Whole-repo security sweep of the agent's ability to affect the host (two parallel audits + manual verification of every critical claim). Compose/app hardening plus code fixes:
