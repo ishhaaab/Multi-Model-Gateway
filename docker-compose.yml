@@ -59,12 +59,25 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # Isolated: no ports to host; backend reaches it at http://sandbox:8001
-    # Container hardening (sweep M1): read-only root fs, no caps, no new privs.
+    # Container hardening (sweep M1): read-only root fs, no new privs, limits.
+    # F1/C2 confinement: the controller needs a MINIMAL cap allow-list so it can
+    # chown the workspace to a per-tenant UID and drop the bash child to it —
+    # CAP_SETUID/SETGID (Popen user=/group=), CHOWN/FOWNER/DAC_OVERRIDE (chown -R
+    # a root-owned tree), KILL (process-group timeout kill). Everything else stays
+    # dropped. The bash child drops to a nonzero UID and the kernel clears ALL its
+    # capabilities, so the child is fully unprivileged regardless of this list.
     read_only: true
     tmpfs:
       - /tmp
     cap_drop:
       - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+      - KILL
     security_opt:
       - no-new-privileges
     mem_limit: 512m

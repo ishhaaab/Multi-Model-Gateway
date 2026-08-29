@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-08-29 — Per-tenant workspace confinement (F1/C2): bash can no longer cross tenants
+
+The last CRITICAL security item is now enforced, not just promised. `bash -lc` runs as a **distinct OS UID** in a workspace directory `chmod 700`'d to that UID, so it cannot read/write another tenant's workspace on the shared `workspaces` volume.
+
+- **New `sandbox/uid_alloc.py`** (deep module): owner-as-registry UID allocation — the workspace directory's `st_uid` IS the record (no side table, collision-free, self-healing). Range 10000–65000, clear of system accounts and `nobody`.
+- **`sandbox/app.py`** allocates on first exec (`chown -R (:uid:gid)`, `chmod 700` the top dir), then spawns `bash` with `Popen(user=<uid>, group=<uid>, start_new_session=True)`. The kernel clears ALL of the child's capabilities when it drops to a nonzero UID, so the bash child is fully unprivileged. `HOME` is set to the workspace so pip/npm/git work; `TMPDIR` points at the tmpfs. (Also fixed a latent `BaseModel` `NameError` — it worked only via FastAPI's accidental re-export.)
+- **`docker-compose.yml`:** the sandbox controller uses a **minimal cap allow-list** (`SETUID`, `SETGID`, `CHOWN`, `FOWNER`, `DAC_OVERRIDE`, `KILL`) instead of `cap_drop: ALL` — `chown`/`setuid` need those caps even as root. Everything else stays dropped, `no-new-privileges`/`read_only` remain; the bash child is still capability-less.
+- **`backend/Dockerfile`:** the prod target no longer runs as `appuser` — the trusted backend must be root to write any tenant's 700 workspace.
+- **Tests:** `tests/test_uid_alloc.py` (6 offline cases — range bounds, next-free selection, collision-free by construction, discoverable-used scan). The chown/setuid path runs only in the Linux sandbox container (no docker on this host, so `docker compose up` should be run before flipping `ENABLE_CODE_EXECUTION=true`).
+- **ADR-0002** updated with the confinement design + the cap allow-list consequence.
+
 ## 2026-08-28 — Workspace disk quota enforced for bash (F9)
 
 - **`.git` now counts toward the workspace quota** (`store.du_mb` no longer skips `.git`). A model-controlled `bash` could run `git clone`/`dd` and grow the workspace far past the quota (the file tools' `_check_quota` was the only gate, and it excluded `.git`).

@@ -134,9 +134,8 @@ COPY . .
 FROM base AS dev          # hot-reload, root user (fine on a local/tailnet box)
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
-FROM base AS prod         # unprivileged user, no reload
-RUN useradd --create-home appuser && chown -R appuser /app
-USER appuser
+FROM base AS prod         # root user, no reload (the trusted backend must be root
+                          # to write any tenant's chmod-700 workspace — F1/C2)
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 

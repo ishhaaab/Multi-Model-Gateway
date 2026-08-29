@@ -450,10 +450,35 @@ Two-audit sweep of the agent's host-impact surface. Fixed in this commit; OPEN i
 - **F10/F11/F12/F13 small fixes:** negative_prompt cap; generic tool-error strings (no internal-topology leak); `tool_call_id` populated for file-edits audit; `write_file` expected_hashes exact-prefix semantics.
 - Sweep-verified clean: no docker.sock/host binds/privileged anywhere; backend never runs model-supplied shell; registry dispatch has no bypass; `calculate`/`search_conversations`/patch-argv bounded and safe.
 
-### OPEN (not fixed — fix before flipping ENABLE_CODE_EXECUTION=true for multiple users)
+### OPEN (not fixed)
 
-- **F1/C2 (CRITICAL): bash is not confined to the caller's workspace** — the `workspaces` volume holds ALL users; `bash -lc` can read/write every one (`sandbox/app.py:26-44`). Fix shape: per-exec mount namespace exposing only `/workspaces/{user}/{agent}`, or per-user volumes.
-- Sandbox network egress is still unrestricted (compose claim corrected; real enforcement needs network policy).
+- **Sandbox network egress is still unrestricted** (compose claim corrected; real enforcement needs network policy — a dedicated `sandbox` network with no route to postgres/redis).
+
+## Per-tenant workspace confinement (F1/C2 closed, 2026-08-29)
+
+The last CRITICAL is now enforced, not promised. `bash` runs as a distinct OS UID in a
+chmod-700 workspace, so it cannot read/write another tenant's workspace on the shared
+volume.
+
+- **A deep `sandbox/uid_alloc.py` module** owns per-tenant UID allocation with
+  **owner-as-registry**: the workspace directory's `st_uid` IS the record. No side table,
+  collision-free (each UID handed out once), self-healing. Range 10000–65000 (clear of
+  system accounts and `nobody`).
+- **`sandbox/app.py`** allocates the UID on first exec (`chown -R (:uid:gid)`, `chmod 700`
+  the top dir), then spawns `bash` via `Popen(user=<uid>, group=<uid>, start_new_session)`.
+  The kernel clears ALL of the child's capabilities when it drops to a nonzero UID, so the
+  bash child is fully unprivileged. `HOME` is set to the workspace so pip/npm/git work;
+  `TMPDIR` points at the tmpfs. The controller (root) keeps the process-group timeout kill.
+- **Compose change (deliberate):** the sandbox controller uses a **minimal cap allow-list**
+  (`SETUID`, `SETGID`, `CHOWN`, `FOWNER`, `DAC_OVERRIDE`, `KILL`) instead of `cap_drop:
+  ALL` — `chown` and `setuid` need those caps even as root. Everything else stays dropped,
+  `no-new-privileges`/`read_only` remain; the bash child is still capability-less.
+- **Backend prod Dockerfile:** dropped `USER appuser` — the trusted backend must be root to
+  write any tenant's 700 workspace (a non-root backend UID couldn't traverse them).
+- **Limitation:** verified by inspection + offline unit tests only (no docker on the host).
+  The allocator's pure logic (`test_uid_alloc.py`, 6 cases) runs offline; the chown/setuid
+  path runs only in the Linux sandbox container. A live `docker compose up` should be run
+  before flipping `ENABLE_CODE_EXECUTION=true`.
 
 ## Workspace disk quota enforced for bash (F9 closed, 2026-08-28)
 
