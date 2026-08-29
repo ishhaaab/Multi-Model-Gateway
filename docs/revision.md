@@ -202,7 +202,7 @@ class Settings(BaseSettings):
     COOKBOOK_CONTEXT_TOKENS: int = 8192
 ```
 
-### Secrets: `get_secret()`
+### Secrets: `get_secret()` / `get_secret_or_none()`
 
 ```python
 def get_secret(name: str) -> str:
@@ -214,11 +214,16 @@ def get_secret(name: str) -> str:
         return env_value
     raise RuntimeError(...)
 
-OLLAMA_API_KEY = get_secret("ollama_api_key")
-OPENROUTER_API_KEY = get_secret("openrouter_api_key")
+def get_secret_or_none(name: str) -> str | None:
+    # like get_secret() but returns None instead of raising when absent —
+    # used for OPTIONAL secrets the app must boot without (roadmap S1)
+    ...
+
+def get_openrouter_api_key() -> str | None:
+    return get_secret_or_none("openrouter_api_key")
 ```
 
-**Why files first:** Docker secrets aren't visible in `docker inspect` or process env listings. **Why the env fallback:** host-side Alembic runs, scripts, and tests would otherwise crash at import — the module-level `get_secret()` calls run the moment `config.py` is imported. **Why module-level constants and not Settings fields:** they're not configuration the user tunes; they're credentials with a different sourcing mechanism.
+**Why files first:** Docker secrets aren't visible in `docker inspect` or process env listings. **Why the env fallback:** host-side Alembic runs, scripts, and tests would otherwise crash at import — the module-level `get_secret()` calls run the moment `config.py` is imported. **Why functions, not module-level constants:** the OpenRouter key is **optional** (S1, DONE) — it is fetched lazily via `get_openrouter_api_key()`, which returns `None` when unset instead of raising, so the backend boots with no key. Every OpenRouter call site guards on that `None`.
 
 **Gotcha that bit us:** `DEBUG=True` makes SQLAlchemy echo every SQL statement — including message content — into logs. It exists for debugging only.
 

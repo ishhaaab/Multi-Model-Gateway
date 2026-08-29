@@ -205,7 +205,10 @@ Migrations: 13 Alembic revisions in `backend/alembic/versions/`. `env.py` import
 8. **Ownership checks return 404 for "not found" and 403 for "someone else's".** (Except where a 403/404 distinction itself leaks — research jobs 404 for both.)
 9. **Background work goes through `core/background.spawn()`** so it doesn't run on the request's DB session or block the response.
 10. **The worker does not hot-reload** (arq). Restart the worker container after changing research code.
-11. **OpenRouter is OPTIONAL** (local-only is the goal). Today the app won't boot without an OpenRouter key because `config.py:99` calls `get_secret("openrouter_api_key")` at import — this is a KNOWN ISSUE (roadmap S1), not intended behavior.
+11. **OpenRouter is OPTIONAL** (local-only is the goal). The key is lazily read via
+    `core.config.get_openrouter_api_key()` (non-raising, returns `None` when unset); it is no
+    longer fetched at module import, so the backend boots with no OpenRouter key (roadmap S1,
+    DONE). Every OpenRouter call site guards on a `None` key and degrades.
 
 ## Documentation convention
 

@@ -40,17 +40,20 @@ CR-17/18/19/20/21/22/23.
 ### Security
 
 #### S1 — Backend won't boot without an OpenRouter key (breaks the primary use case) · HIGH
-- **Where:** `core/config.py:99` `OPENROUTER_API_KEY = get_secret("openrouter_api_key")` runs at
+- **Where:** `core/config.py` `OPENROUTER_API_KEY = get_secret("openrouter_api_key")` ran at
   module import.
 - **Why:** `get_secret` raises `RuntimeError` if neither `/run/secrets/openrouter_api_key` nor
   `$OPENROUTER_API_KEY` exists. README marks the key as *not required* and the local-only setup
-  (LM Studio + ComfyUI over Tailscale) is the stated goal. Today the app cannot start without a
+  (LM Studio + ComfyUI over Tailscale) is the stated goal. The app could not start without a
   dummy key.
-- **Fix:** make the key lazy and optional. Replace the module-level call with
-  `get_openrouter_api_key() -> str | None` (add a non-raising `get_secret_or_none`). Guard
-  every OpenRouter call site on a non-None key: `services/router.py::get_openrouter_client`,
-  `services/research.py::_pick_client`, `routers/models.py::list_openrouter_models` — return
-  `None`/502/skip when unset.
+- **Status: DONE** — the key is now lazy and optional. `core/config.py` adds
+  `get_secret_or_none(name)` (non-raising; returns `None` when absent) and
+  `get_openrouter_api_key() -> str | None`; the eager module-level `get_secret(...)` call is
+  gone. Every OpenRouter call site routes through `get_openrouter_api_key()` and guards on a
+  non-None key: `services/router.py::get_openrouter_client`, `services/research.py::_pick_client`,
+  `routers/models.py::list_openrouter_models`, `provider_router.py`, `provider_registry.py`,
+  `memory_curation.py` — each degrades (returns `None`/502/skips) when the key is unset. The
+  backend now boots with no OpenRouter key at all.
 
 #### S2 — `/metrics` unauthenticated and the backend port is host-published · HIGH
 - **Where:** `main.py:36` `Instrumentator().instrument(app).expose(app)` (no auth);
@@ -290,7 +293,8 @@ CR-17/18/19/20/21/22/23.
 - **Phase 4:** `pip freeze` matches pinned `requirements.txt`.
 
 ## Critical files
-- `backend/app/core/config.py:99` — eager `OPENROUTER_API_KEY = get_secret(...)` (S1).
+- `backend/app/core/config.py` — `get_openrouter_api_key()` / `get_secret_or_none()` (S1, DONE:
+  the key is lazy and optional, no module-import fetch).
 - `backend/app/core/trusted_proxies.py` — stdlib `resolve_client_ip` (S5): trusts
   `X-Forwarded-For` only from peers inside `trusted_proxy_networks`.
 - `backend/app/services/agent.py::run_agent` — closes the request session before the loop (R1)
