@@ -253,18 +253,25 @@ Key settings: `LM_URL` / `LM_DEFAULT_MODEL` / `LM_CHAT_MODEL` (LM Studio), `LM_E
 
 ## Known issues / what's left (authoritative: docs/backend-roadmap.md)
 
-The roadmap is organized into phases. Highest-priority open items:
+All priority items from the security sweep and the roadmap's Phase 1–4 are **closed**. Every
+finding (S1–S7, R1–R7, D1/D3/D4, M1–M4, plus the working-tree F1/C2, F5–F9, F11 sweeps) has a
+commit and a `Status: DONE` line in `docs/backend-roadmap.md`. The never-re-touch list is:
+CR-1, CR-2, CR-3/4/5, CR-6, CR-8, CR-9, CR-13, CR-12, HIGH-5, MED-6, MED-1, HIGH-2/4/7/8,
+MED-4/5/8/9/10/11, DEV-1..12, S1, S2, S3, S4, S5, S7, R1–R7, D1, D3, D4, R7, M1, M2, M3, M4.
 
-- **S1** (HIGH): App won't boot without an OpenRouter key — make `get_secret("openrouter_api_key")` lazy/optional.
-- **S2** (HIGH): `/metrics` unauthenticated + backend port published on the host.
-- **S3** (HIGH): Caddy proxies ComfyUI `/view*` unauthenticated (path-traversal history).
-- **R1** (HIGH): Agent loop holds the DB connection for the whole multi-round run.
-- **R2** (HIGH): Agent `messages` array grows unbounded → context overflow mid-loop.
-- **S4/S5** (MEDIUM): register email enumeration; rate limiter trusts `X-Forwarded-For` unconditionally.
-- **R3–R6** (MEDIUM): fake local token counts; research uses the rewrite model; ComfyUI node-anchor substring matching; DDG silent empty failures.
-- **D4, R7, M1, M4** (minor): pagination on list endpoints, expired-token sweep, unpinned deps, CI schema-drift guard.
+Two deliberate, documented gaps remain:
 
-Read `docs/backend-roadmap.md` in full before starting any fix — it contains the exact fix plan, verification steps, and the list of issues.md items that are already fixed (do NOT re-touch: CR-1, CR-2, CR-3/4/5, CR-6, CR-8, CR-9, CR-13, CR-12, HIGH-5, MED-6, MED-1, HIGH-2/4/7/8, MED-4/5/8/9/10/11, DEV-1..12).
+- **Detection/infra verification:** the sandbox confinement (F1/C2), egress isolation, and the
+  "boots with no OpenRouter key" (S1) change have been verified by inspection + offline unit
+  tests only — **no docker on this host**. Before flipping `ENABLE_CODE_EXECUTION=true`, run
+  `docker compose up --build` and the live checks in `docs/backend-roadmap.md`.
+- **Defense-in-depth (deferred):** sandbox can still reach any *public* internet host via NAT.
+  Segmentation keeps it off your internal services/host; a domain allowlist would need an
+  egress proxy.
+
+Read `docs/backend-roadmap.md` in full before starting any fix — it contains the exact fix plan,
+verification steps, and the list of issues.md items that are already fixed (do NOT re-touch the
+items listed above).
 
 ## How to run & verify
 
