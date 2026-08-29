@@ -39,6 +39,14 @@ services:
     # GPU access (needs nvidia-container-toolkit); without it the endpoints
     # degrade to cpu_only verdicts:
     gpus: all
+    # Egress segmentation: the backend is the ONLY compose peer of the sandbox
+    # (it calls sandbox /exec). The backend stays on the default network (for
+    # postgres/redis/worker/searxng + host-gateway) and joins sandboxnet so /exec
+    # still works. The sandbox sits on sandboxnet ALONE and has no route to the
+    # internal services or the host (its host-gateway is dropped below).
+    networks:
+      - default
+      - sandboxnet
 
   # Code-execution sandbox for file tools (security sweep C1/H1/H3/M1).
   # Per-user-per-agent git-backed workspaces live on the shared named volume.
@@ -56,8 +64,14 @@ services:
     # it into BOTH backend and sandbox; the sandbox app fail-closes without it.
     environment:
       - SANDBOX_SHARED_SECRET=${SANDBOX_SHARED_SECRET:-}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    # Egress segmentation: the sandbox sits on sandboxnet ALONE, so it can reach
+    # ONLY the backend (its sole compose peer) plus outbound internet via NAT. It
+    # has NO route to postgres/redis/backend-internals/worker/searxng — the
+    # internal surface is off-limits to a model-driven shell. NO host-gateway: the
+    # sandbox never calls LM Studio/ComfyUI/host (the backend does), so exposing
+    # the host network here was pure added surface.
+    networks:
+      - sandboxnet
     # Isolated: no ports to host; backend reaches it at http://sandbox:8001
     # Container hardening (sweep M1): read-only root fs, no new privs, limits.
     # F1/C2 confinement: the controller needs a MINIMAL cap allow-list so it can
@@ -146,6 +160,17 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - backend
+
+
+# Egress segmentation (sandbox egress gap): the sandbox is isolated onto its own
+# user-defined network with the backend as its ONLY peer, so a model-driven shell
+# has no route to postgres/redis/backend/worker/searxng or the host. A user-defined
+# network still gets outbound NAT, so pip/npm/git builds keep working. The backend
+# joins both networks (default for internal services + host-gateway, sandboxnet for
+# /exec). All other services stay on the default network untouched.
+networks:
+  sandboxnet:
+    driver: bridge
 
 
 volumes:

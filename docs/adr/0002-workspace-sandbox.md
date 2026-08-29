@@ -37,3 +37,11 @@ Everything else stays dropped, `no-new-privileges` and `read_only` remain — th
 child still ends up capability-less. The backend prod Dockerfile no longer runs as
 `appuser`; the trusted backend must be root to write any tenant's 700 workspace.
 
+## Egress — confined by network, not by string filter
+
+The sandbox sits on its own user-defined network (`sandboxnet`) with the backend as its
+only compose peer, so a model-driven shell cannot reach postgres/redis/backend/worker/
+searxng. It has outbound NAT (pip/npm/git work) but no route to the internal services or
+the host (`host.docker.internal` is not present on the sandbox). `SANDBOX_ALLOWLIST`
+remains aspirational dead config — a domain-level allowlist would need an egress proxy.
+

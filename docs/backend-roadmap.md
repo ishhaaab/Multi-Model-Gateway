@@ -452,7 +452,16 @@ Two-audit sweep of the agent's host-impact surface. Fixed in this commit; OPEN i
 
 ### OPEN (not fixed)
 
-- **Sandbox network egress is still unrestricted** (compose claim corrected; real enforcement needs network policy — a dedicated `sandbox` network with no route to postgres/redis).
+_None._ All priority security items from the sweep are closed (F1/C2, F5, F6, F7, F8, F9, F11). The sole remaining gap is a **domain-level** egress allowlist (sandbox can still reach any public internet host via NAT) — deliberately deferred as a defense-in-depth item; segmentation now keeps it off your internal services and host.
+
+## Sandbox egress isolation (2026-08-29)
+
+The sandbox ran on the default Docker bridge, so a model-driven `bash` could reach every internal service (postgres, redis, backend, worker, searxng) and the host network via `host.docker.internal`.
+
+- **`docker-compose.yml`:** added a `sandboxnet` user-defined network; the **sandbox sits on it alone** (its only compose peer is the backend for `/exec`), with **no route** to postgres/redis/backend-internals/worker/searxng. The backend joins `[default, sandboxnet]`. A user-defined bridge still gives outbound NAT, so pip/npm/git keep working.
+- **Removed `host.docker.internal` from the sandbox** (never needed it; exposes the host). Backend keeps its host-gateway.
+- **Scope:** segmentation, not a domain allowlist (that needs an egress proxy). `SANDBOX_ALLOWLIST` stays aspirational dead config.
+- Live checks: `docker compose exec sandbox bash -lc 'curl --max-time 3 http://postgres:5432'` must fail while `pip install` succeeds. Confirmed by inspection only (no docker on the host).
 
 ## Per-tenant workspace confinement (F1/C2 closed, 2026-08-29)
 

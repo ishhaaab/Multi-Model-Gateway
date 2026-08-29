@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-29 — Sandbox egress isolation (last OPEN item)
+
+The sandbox ran on the default Docker bridge, so a model-driven `bash` could reach **every** internal service (postgres, redis, backend, worker, searxng) and the **host network** via `host.docker.internal`. `SANDBOX_ALLOWLIST` was dead config (read by nothing) — can't fix egress by pattern-matching `cmd`.
+
+- **Network segmentation in `docker-compose.yml`:** added a `sandboxnet` user-defined network. The **sandbox sits on it alone** → its only compose peer is the backend (`/exec`), and it has **no route** to postgres/redis/backend-internals/worker/searxng. The backend joins `[default, sandboxnet]` so `http://sandbox:8001` still resolves. A user-defined bridge still provides outbound NAT, so pip/npm/git builds keep working.
+- **Removed `host.docker.internal` from the sandbox** — the sandbox never calls LM Studio/ComfyUI/host (the backend does); exposing the host network was added attack surface. The backend keeps its host-gateway.
+- **Scope:** segmentation (keep the shell off internal services + host), not a full domain allowlist (that would need an egress proxy). `SANDBOX_ALLOWLIST` remains documented as aspirational dead config.
+- **Verification:** YAML validated + network-attachment consistency checked by inspection (no docker on this host). Live check: `docker compose exec sandbox bash -lc 'curl -s http://postgres:5432'` should time out while `pip install` still works.
+
 ## 2026-08-29 — Per-tenant workspace confinement (F1/C2): bash can no longer cross tenants
 
 The last CRITICAL security item is now enforced, not just promised. `bash -lc` runs as a **distinct OS UID** in a workspace directory `chmod 700`'d to that UID, so it cannot read/write another tenant's workspace on the shared `workspaces` volume.
