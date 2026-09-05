@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-09-06 — Roadmaps updated: backend Phase 6 (data/AI platform) + web-SPA polish-first
+
+Docs-only change (no code).
+
+- **`docs/backend-roadmap.md`:** new "Phase 6 — Data & AI platform upgrades (planned,
+  JD-driven)" — P6.1 usage warehouse + DuckDB/dbt analytics pipeline, P6.2 eval harness +
+  prompt experiments, P6.3 learned router (champion/challenger over the keyword rules),
+  P6.4 governance pack (provenance completion, PII redaction before embedding, retention/
+  erasure, permission audit log). Build order: P6.1 → P6.4(a) → P6.2 → P6.3.
+- **`docs/frontend-roadmap.md`:** reframed — the React/Vite web SPA is the primary client
+  for the JPMC application window; the Expo mobile plan is deferred (kept, not deleted).
+  New Phase P0 (polish, from the 2026-09-06 web-interface-guidelines review: a11y, focus
+  management, reduced motion, headings, copy, scale) runs BEFORE any new features; new
+  Phase F1 (usage/governance dashboard, eval scorecards, governance views) consumes backend
+  Phase 6 and starts only after P0. Stale assumption fixed: the web app does have vitest
+  tests.
+
 ## 2026-09-06 — Installable from a fresh clone: cross-platform venv setup
 
 The backend already had a pip-compile lockfile (`backend/requirements.txt`), but a fresh

@@ -1279,3 +1279,64 @@ and becomes exact (real `n_layer`/`n_embd`/`n_head[_kv]`).
   arrays walk each element (`u64` length prefix + bytes), and a payload that
   overruns the buffer fails the parse (None) instead of silently truncating.
   Array values are never stored — the fit fields are all scalars/strings.
+
+## Phase 6 — Data & AI platform upgrades (planned — JD-driven, 2026-09-06)
+
+Priority reframe for the 2027 JPMC Data & AI Program application window: the backend's
+GenAI half (agents, RAG memory, presets, sandboxed tools, deep research) is already strong;
+the "Data &" half — pipelines, predictive modeling, experimentation, governance — is where
+the gaps are. Four upgrades, each traceable to a specific JD line, in build order. Nothing
+implemented yet.
+
+#### P6.1 — Usage warehouse + analytics pipeline · HIGH
+- **Where:** operational Postgres only. Prometheus counters are live aggregates; there is no
+  per-request analytical store, and `messages.token_provenance` / `model_used` are written
+  but never analyzed.
+- **Why (JD):** "design scalable data platforms and pipelines… integrate diverse datasets"
+  and "data platforms, pipelines, models, taxonomies, metadata, lineage".
+- **Fix:** arq cron ETL from Postgres into a columnar store (DuckDB + Parquet):
+  `fact_generation` (user, conversation, model, provider, tokens in/out, latency, cost,
+  routed provider, preset, provenance) + `dim_model` / `dim_user` / `dim_provider`.
+  Transforms via dbt (lineage graphs + data tests for free). Read-only analytics endpoints
+  feed the SPA dashboard (frontend roadmap Phase F1).
+- **Status: TODO**
+
+#### P6.2 — Eval harness + prompt experiments · HIGH
+- **Where:** no evaluation code anywhere in `backend/app`; prompt quality is unmeasured;
+  presets are swapped by feel.
+- **Why (JD):** "prompt engineering" (preferred qualification), "run experiments tied to key
+  performance indicators", "translate business objectives into testable hypotheses".
+- **Fix:** golden-set evals per task type; deterministic checks + LLM-as-judge scoring;
+  per-preset scorecards persisted in Postgres; regression gate on prompt/model change; A/B
+  mode for two presets reporting uplift with a significance test (bootstrap or t-test).
+- **Status: TODO**
+
+#### P6.3 — Learned router (champion/challenger) · MEDIUM
+- **Where:** `services/provider_router.py::resolve_role` is a keyword heuristic; routing
+  decisions and outcomes are not logged.
+- **Why (JD):** "develop predictive models, test hypotheses… apply data, statistics, and
+  modeling to solve complex problems".
+- **Fix:** log routing features + outcomes (P6.1 provides the store), train a logistic
+  regression / GBM "needs cloud?" predictor, ship behind a flag with the keyword rules as
+  champion. Decide cost-vs-quality from the warehouse. The label proxy must be defensible
+  in an interview (e.g. downstream eval scores from P6.2 — not vibes).
+- **Status: TODO**
+
+#### P6.4 — Governance pack · MEDIUM
+- **Where:** provenance is partial (`model_used`, `tokens_used`, `token_provenance` exist —
+  no preset/template version, no retrieved-memory ids, no tool-call linkage on messages);
+  pgvector `memories` accept raw content with no PII screen; no retention/erasure; no
+  audit trail for `tool_permissions` grants.
+- **Why (JD):** "support data governance, risk management, and data standards… metadata,
+  lineage, privacy, and regulatory compliance… implement controls, improve data quality".
+- **Fix:** (a) complete the provenance chain so any assistant response is reconstructable;
+  (b) PII detection + redaction before embedding into `memories`; (c) retention policy +
+  hard-delete cascade (GDPR-style erasure) on users/conversations/memories; (d) audit log
+  for tool-permission grants/denials. Item (a) is cheap and lands first — it feeds P6.1's
+  fact table.
+- **Status: TODO**
+
+Build order: **P6.1 → P6.4(a) → P6.2 → P6.3** (everything consumes the warehouse; the
+router's training labels come from evals). The SPA dashboard that consumes P6.1 is tracked
+in `docs/frontend-roadmap.md` (Phase F1) and starts only after the polish phase (Phase P0)
+there.

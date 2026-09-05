@@ -1,14 +1,122 @@
-# Frontend Roadmap — Native Mobile App (Expo / React Native)
+# Frontend Roadmap — Web SPA first (polish), Mobile deferred
 
-## Context
+## Current focus (2026-09): polish the existing web SPA
+
+The React/Vite SPA (`frontend/`, ~11.7k lines: React 19 + Tailwind 4 + zustand + vitest) is
+the **primary client** for the JPMC 2027 Data & AI application window — it is the demoable
+artifact. Order of work:
+
+1. **Phase P0 — polish pass (now).** Fix what the 2026-09-06 web-interface-guidelines review
+   found BEFORE any new features (batches P0.1–P0.6 below).
+2. **Phase F1 — JD-driven feature additions (after P0).** Usage/governance dashboard, eval
+   scorecards, governance views. Each consumes backend Phase 6 endpoints
+   (`docs/backend-roadmap.md`). Contract first: define the read-API shape in the "Backend
+   contract additions" section of this file, build pages against seeded dev data, then land
+   the backend pipeline that feeds them.
+
+## Phase P0 — Web SPA polish (from the 2026-09-06 guidelines review)
+
+Systemic findings: **no** `aria-live`/`role="status"`/`role="alert"` anywhere in the SPA; no
+`aria-expanded` on any disclosure/dropdown; hover-only reveals without focus equivalents; no
+`prefers-reduced-motion` support; Modal has no focus management; no error boundary; several
+pages lack an `<h1>`.
+
+### P0.1 — Foundations (global)
+- `prefers-reduced-motion` media query gating all keyframes in `src/index.css`
+  (fade-in / slide-up / scale-in / pulse-dot / shimmer / branch-flash).
+- Error boundary around routes (`src/main.tsx`) with a styled fallback + retry.
+- Skip-to-content link; label the `<main>` landmark (`src/components/layout/AppShell.tsx:43`).
+- `:focus` → `:focus-visible` consistency (`src/components/ui/Input.tsx:17` rings on mouse focus).
+- `tabular-nums` on every token/number chip; `text-wrap: balance` on headings (`index.css`).
+- Self-host the three Google fonts (render-blocking stylesheet today) or preload them.
+- `body { background-attachment: fixed }` (`index.css:89`) → fixed pseudo-element (mobile
+  scroll repaints).
+
+### P0.2 — Design-system a11y (`src/components/ui/`)
+- **Modal.tsx**: initial focus + focus trap + focus restore; `aria-labelledby` to the title;
+  `overscroll-behavior: contain` on scrollable content.
+- **Dropdown.tsx:64-136**: full listbox semantics — `aria-expanded`/`aria-haspopup`,
+  `role="listbox"`/`option`/`aria-selected`, arrow-key navigation + typeahead, focus return
+  to trigger on Esc.
+- **Toggle.tsx:28-40**: the switch has no accessible name (the wrapping `<label>` does not
+  name a button) — wire `aria-labelledby` to the label text.
+- **Input.tsx**: `aria-invalid` + `aria-describedby` linking error/hint to the input;
+  **PasswordInput** visibility toggle `tabIndex={-1}` (`Input.tsx:79`) is keyboard-unreachable.
+- **Toaster.tsx:24** + `stores/ui-store.ts:25`: `aria-live` container (assertive for errors);
+  error toasts must outlive the fixed 4200 ms auto-dismiss; hover-pause.
+
+### P0.3 — Composed-surface a11y
+- **[P0] `src/components/chat/ModelSelector.tsx:61`** — the model flyout opens on hover ONLY
+  (`invisible … group-hover/row:visible`): keyboard users cannot pick a specific model. Make
+  it click/keyboard-toggled with `aria-expanded`.
+- Hover-reveal bars need focus-reveal (`focus-visible:opacity-100`): `MessageBubble.tsx:38`,
+  `ConversationList.tsx:141-154`, `pages/images.tsx:52-88` (Download link, Fullscreen, Copy
+  also need `aria-label`s — they carry `title` only).
+- Icon-only controls missing names: private toggle `ChatInput.tsx:81`; seed number input
+  `images.tsx:290` (placeholder-only, no label); panel/page buttons at
+  `settings/PresetPanel.tsx:39,100`, `TemplatePanel.tsx:26,78`, `WorkflowPanel.tsx:27,77,99`,
+  `ProviderPanel.tsx:39,84`, `models/LocalModels.tsx:72,103`, `ModelList.tsx:90,111`,
+  `agent/ToolStepCard.tsx:28`, `agent/WorkspacePanel.tsx:76`, `pages/agents.tsx:55`,
+  `pages/models.tsx:264`, `pages/presets.tsx:64`, `pages/templates.tsx:63`,
+  `pages/workflows.tsx:56`, `pages/research.tsx:195`, `pages/settings.tsx:269`.
+- `aria-expanded` + `aria-controls` on the "Advanced Options" disclosure (`images.tsx:171`).
+- `role="alert"` on error banners: `MessageList.tsx:122`, `login.tsx:76`, `register.tsx:105`;
+  `role="status"` on the "Generating…" indicators (`ChatInput.tsx:138`).
+- RightSidebar tab groups → `role="tablist"`/`tab`/`aria-selected` (`RightSidebar.tsx:156-190`);
+  collapsed-rail icon NavLinks in `Sidebar.tsx:143-201` have `title` but need `aria-label`.
+- Clear image history (`images.tsx:367`) is destructive without a ConfirmDialog.
+- Auth submits disabled until fields are filled (`login.tsx:82`, `register.tsx:116`) — prefer
+  enabled submit + inline validation per guidelines.
+- Rename inputs lack `aria-label`s (`ConversationList.tsx:110`, `ChatHeader.tsx:65`).
+
+### P0.4 — Headings & copy
+- Pages missing `<h1>`: chat (no heading at all), agent, agents, research, presets,
+  templates, workflows (images/marketplace/models/not-found/providers/settings have one).
+- Title-case audit per Chicago; `…` not `...`; loading strings end with `…`; specific CTA
+  labels ("Delete conversation", not "Confirm").
+- Adopt the `EmptyState` component everywhere (conversation list, image history, tables).
+
+### P0.5 — Resilience & scale
+- truncate / line-clamp audit on long titles, prompts, and JSON views; `min-w-0` on flex
+  children carrying long content.
+- Conversations list: wire the backend D4 `limit`/`offset` pagination (currently unfetched
+  pages); MessageList windowing/virtualization for long threads (Markdown + highlight.js
+  per message is heavy).
+- Unsaved-changes guards on presets/templates/workflows/providers forms.
+- Replace the magic hex `bg-[#3A2D5E]` user bubble (`MessageBubble.tsx:120`) with a token;
+  single source for provider dot colors (`lib/utils.ts` has two: `getProviderInfo` +
+  `PROVIDER_DOT`); distinct icons for Agent vs Agents and Marketplace vs Models
+  (`Sidebar.tsx:34-42` reuses Bot and Library).
+
+### P0.6 — Verification
+- Keyboard-only pass over every page; axe/Lighthouse a11y score ≥ 95; visual check with
+  `prefers-reduced-motion: reduce`; responsive pass at 480/768/1280; vitest coverage for the
+  touched primitives.
+
+## Phase F1 — JD-driven additions (after P0; consumes backend Phase 6)
+
+- **Usage & governance dashboard** (new route): spend/cost per conversation and model,
+  local-vs-cloud model mix, latency percentiles, routing decisions, provenance drill-down
+  (consumes backend P6.1). This is the interview demo centerpiece.
+- **Eval scorecards UI**: per-preset scores, A/B results with uplift + significance
+  (consumes backend P6.2).
+- **Governance views**: memory browser with redaction status; audit log of tool-permission
+  grants (consumes backend P6.4).
+- Define each read-API contract in "Backend contract additions" below before building UI.
+
+## Deferred: native mobile app (Expo / React Native)
+
+The plan below is **deferred, not cancelled** — revisit after the application window. It
+assumed the mobile app would replace the web frontend; that framing is now inverted (the
+web SPA is primary). Everything below is retained as written for the eventual port.
 
 The backend is a self-hosted inference gateway (LM Studio chat, ComfyUI images, OpenRouter,
 agent + deep research) reached from a phone over Tailscale. The existing React/Vite web frontend
-(`frontend/`) works but isn't the right form factor — the goal is a **native mobile app**. This
-roadmap builds a new Expo/React Native app in a `mobile/` directory that replaces the web
-frontend as the primary client. The web frontend stays as-is for reference/desktop.
+(`frontend/`) works but isn't the right form factor for phone use — the eventual goal is a
+**native mobile app**. This part of the roadmap builds a new Expo/React Native app in a
+`mobile/` directory. The web frontend remains the primary client meanwhile.
 
-**Decisions settled:**
+**Decisions settled (unchanged from when the mobile plan was written):**
 - **Stack: Expo + React Native + TypeScript.** Reuses existing TS knowledge and ports the API
   contract layer (types, SSE parsing, Zustand stores) from the web app.
 - **Platform: Android-first.** iOS can follow from the same codebase.
@@ -491,7 +599,9 @@ response shapes for the model detail screen:
 - **`react-native-sse` is the SSE transport** (supports POST + custom headers). Fallback:
   `@microsoft/fetch-event-source` + ReadableStream polyfill if it breaks on the target RN
   version. Test it first in Phase 1 with a simple chat send.
-- **The web frontend is NOT deleted** — stays as the desktop/reference client.
+- **The web frontend is the PRIMARY client until further notice** (JPMC 2027 Data & AI
+  application window — see Phases P0/F1 at the top of this file); the mobile app is
+  deferred, not cancelled.
 - **Provider API is plain JSON CRUD — no SSE.** The provider list/create/update/delete/test
   endpoints use ordinary `apiClient.request()` calls; only chat/agent/research stream.
 - **Agent + Research results are ephemeral** in the UI (not persisted to the conversation),
@@ -504,8 +614,9 @@ response shapes for the model detail screen:
 - **Gateway URL is a user-entered setting**, not a build-time env var (no rebuild to change
   URL). Fallback: `EXPO_PUBLIC_GATEWAY_URL` EAS env var if a baked-in URL is preferred.
 - **Android-first; iOS later** (same codebase; iOS build needs Apple Developer credentials).
-- **No automated tests** (the web app has none). Manual verification per the Verification
-  section. If tests are later wanted: React Native Testing Library + Jest.
+- **The web SPA has vitest tests** (`src/lib/agent-events.test.ts`, `api-client.test.ts`,
+  `sse-events.test.ts`) — port the interpreter tests to the RN equivalents. RN UI tests:
+  React Native Testing Library + Jest, added lazily.
 - **Gateway operator onboarding is handled by `setup.ps1`/`setup.sh`** — they generate
   `.env` and start the stack; the mobile app's first-launch onboarding remains a single
   gateway-URL entry.
