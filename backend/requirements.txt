@@ -262,7 +262,7 @@ uvicorn[standard]==0.52.1
     # via
     #   -r /app/requirements.in
     #   mcp
-uvloop==0.22.1
+uvloop==0.22.1 ; sys_platform != "win32"
     # via uvicorn
 watchfiles==1.2.0
     # via uvicorn

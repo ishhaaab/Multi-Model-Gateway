@@ -4,6 +4,11 @@
 #   pip-compile --output-file requirements.txt requirements.in
 # (run inside the backend container: `docker compose exec -T backend pip-compile ...`).
 # requirements.txt is generated — never edit it by hand.
+#
+# Cross-platform note: uvicorn[standard] pulls uvloop (Unix-only). The lockfile
+# must carry the `; sys_platform != "win32"` marker on the uvloop pin or Windows
+# venv installs die building it. If your pip-compile regenerates the pin without
+# the marker, re-add it in the same commit (see README "Running without Docker").
 
 # Web framework + ASGI
 fastapi

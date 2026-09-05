@@ -177,6 +177,7 @@ account, close the door: set `REGISTRATION_ENABLED=false` in `.env` and restart 
 ```
 llm-gateway/
   .env                          # Environment variables (gitignored)
+  requirements.txt              # pip shim → backend/requirements.txt (venv installs)
   docker-compose.yml            # Orchestrates 6 services
   arch-dia.png                  # Architecture diagram
   backend/
@@ -254,6 +255,65 @@ llm-gateway/
    - API docs (Swagger UI): `http://localhost:2727/docs`
    - Prometheus: `http://localhost:9090` (loopback-only — not reachable from the tailnet)
    - Grafana: `http://localhost:3000` (loopback-only — not reachable from the tailnet; admin user `admin`, password from `GRAFANA_ADMIN_PASSWORD` in your generated `.env` — the setup script generates one if you don't set it)
+
+---
+
+## Running the Backend Without Docker (venv)
+
+To work on the FastAPI backend directly from a virtualenv (debugging, IDE tooling, no
+Docker for the app itself):
+
+**Prerequisites:**
+- Python 3.11+ (the lockfile is compiled on 3.11; 3.13 is verified to install too)
+- A Postgres 16 server **with the `pgvector` extension** and a Redis server reachable
+  from the host. The compose `postgres`/`redis` services publish **no host ports**, so
+  either run your own (system packages / installers) or expose them via a
+  `docker-compose.override.yml` (gitignored-safe, Docker-only):
+  ```yaml
+  services:
+    postgres:
+      ports: ["127.0.0.1:5432:5432"]
+    redis:
+      ports: ["127.0.0.1:6379:6379"]
+  ```
+
+**Setup:**
+
+1. Create a venv at the repo root and install the pinned dependencies:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate          # Windows: .venv\Scripts\activate
+   pip install -r requirements.txt    # root shim → backend/requirements.txt
+   ```
+   `uvloop` (pulled in by `uvicorn[standard]`) is skipped automatically on Windows via
+   an environment marker — the app runs uvicorn's standard event loop there.
+
+2. Create **`backend/.env`** — settings and alembic both load it from the directory you
+   run from (`backend/`). Required keys:
+   ```env
+   LM_URL=http://localhost:1234/v1
+   LM_DEFAULT_MODEL=<LM Studio model id>
+   COMFY_URL=http://localhost:8188
+   DATABASE_URL=postgresql+asyncpg://<user>:<password>@localhost:5432/<db>
+   REDIS_URL=redis://localhost:6379/0
+   SECRET_KEY=<python -c "import secrets; print(secrets.token_hex(32))">
+   ALGORITHM=HS256
+   ```
+   Use `localhost`, **not** `host.docker.internal` — there's no container network on
+   this path. Provider API keys that Docker mounts as secrets (e.g. `OPENROUTER_API_KEY`)
+   fall back to plain env vars via `get_secret()` — add them to the same `.env`. The app
+   boots without OpenRouter (it's optional).
+
+3. Migrate and run:
+   ```bash
+   cd backend
+   alembic upgrade head
+   uvicorn app.main:app --reload --port 8000
+   ```
+
+The arq worker (deep research) needs the same env — from `backend/` in a second shell:
+`arq app.worker.WorkerSettings`. Backend unit tests run offline the same way:
+`python -m unittest discover -s tests -p "test_*.py"`.
 
 ---
 

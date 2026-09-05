@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-09-06 — Installable from a fresh clone: cross-platform venv setup
+
+The backend already had a pip-compile lockfile (`backend/requirements.txt`), but a fresh
+venv install was broken on Windows and the non-Docker path was undocumented.
+
+- **`backend/requirements.txt`:** `uvloop` (pulled by `uvicorn[standard]`, Unix-only) was
+  pinned **without** its `sys_platform != "win32"` marker — the compile step dropped it —
+  so `pip install` died trying to build uvloop on Windows. The marker is now on the pin.
+  `requirements.in` warns that regeneration must preserve it.
+- **Root `requirements.txt` shim** (`-r backend/requirements.txt`) so the canonical
+  `python -m venv .venv && pip install -r requirements.txt` works from a fresh clone.
+- **README:** new "Running the Backend Without Docker (venv)" section — venv + pip,
+  `backend/.env` with the required keys (use `localhost`, not `host.docker.internal` —
+  no container network on the bare-metal path), pgvector/Redis reachability (compose
+  publishes no host ports; override-file snippet included), alembic + uvicorn + arq
+  commands, offline test command.
+- **Verified:** fresh venv on Python 3.13 / Windows installs the full lockfile and
+  `import app.main` succeeds (previously failed at uvloop).
+- `.gitignore`: `.venv/` and `venv/`.
+
 ## 2026-08-29 — Sandbox egress isolation (last OPEN item)
 
 The sandbox ran on the default Docker bridge, so a model-driven `bash` could reach **every** internal service (postgres, redis, backend, worker, searxng) and the **host network** via `host.docker.internal`. `SANDBOX_ALLOWLIST` was dead config (read by nothing) — can't fix egress by pattern-matching `cmd`.
